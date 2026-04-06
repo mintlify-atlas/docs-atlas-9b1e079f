@@ -1,0 +1,247 @@
+---
+title: "Installation"
+description: "Install ORT via pre-built binaries, Docker, or by building from source."
+---
+
+## System requirements
+
+ORT runs on Linux, macOS, and Windows. The core team continuously tests all three platforms.
+
+| Requirement | Minimum | Recommended |
+|-------------|---------|-------------|
+| Java        | 21      | Latest LTS  |
+| Memory      | —       | 8 GiB       |
+| CPU cores   | —       | 4 cores     |
+
+Set the JVM memory limit before running ORT to avoid out-of-memory errors on large projects:
+
+```bash
+export JAVA_OPTS="$JAVA_OPTS -Xmx8g"
+```
+
+Some package managers require additional external tools (for example, Node.js for npm projects or Python for pip projects). Run the following command after installation to check which tools are needed for your project:
+
+```bash
+ort requirements
+```
+
+If a package manager is not listed by `ort requirements`, its support is built directly into ORT and requires no additional tools.
+
+<Note>
+  Set your system locale to `en_US.UTF-8` before running ORT. Other locales can cause parsing errors in the output of some external tools.
+</Note>
+
+---
+
+## Installation methods
+
+<Tabs>
+  <Tab title="From binaries">
+
+Download a pre-built distribution from the [ORT releases page](https://github.com/oss-review-toolkit/ort/releases/latest).
+
+In the **Assets** section of a release you will find two types of archives:
+
+| Archive prefix | Contents |
+|----------------|----------|
+| `ort-*`        | The main ORT CLI (`bin/ort`, `bin\ort.bat`) |
+| `orth-*`       | The ORT Helper CLI (`bin/orth`, `bin\orth.bat`) — useful for managing curations and configurations |
+
+Download the archive that matches your platform (`.tgz` for Linux/macOS, `.zip` for Windows), then unpack it to a directory of your choice.
+
+<CodeGroup>
+
+```bash Linux / macOS
+# Unpack (replace X.Y.Z with the release version)
+tar -xzf ort-X.Y.Z.tgz -C /opt/ort
+
+# Run ORT
+/opt/ort/bin/ort --help
+```
+
+```batch Windows
+# Unpack with your preferred tool (e.g. 7-Zip), then run:
+bin\ort.bat --help
+```
+
+</CodeGroup>
+
+Add the `bin` directory to your `PATH` so you can invoke `ort` directly from any directory.
+
+  </Tab>
+  <Tab title="Docker image">
+
+The Docker image is the fastest way to get a fully working ORT environment, including all supported package managers pre-installed.
+
+Two images are available from the GitHub Container Registry:
+
+| Image | Description | Approx. size |
+|-------|-------------|--------------|
+| `ghcr.io/oss-review-toolkit/ort` | All supported package managers | ~7 GB |
+| `ghcr.io/oss-review-toolkit/ort-minimal` | Most common package managers only | ~3 GB |
+
+**Pull and run the latest release:**
+
+```bash
+docker run ghcr.io/oss-review-toolkit/ort --help
+```
+
+**Run a specific version:**
+
+```bash
+docker run ghcr.io/oss-review-toolkit/ort:13.0.0 --version
+```
+
+**Check which tool versions are bundled:**
+
+```bash
+docker run ghcr.io/oss-review-toolkit/ort requirements
+```
+
+**Use `--rm` to avoid accumulating stopped containers:**
+
+```bash
+docker run --rm ghcr.io/oss-review-toolkit/ort [command]
+```
+
+To analyze a project on your host machine, mount the project directory into the container:
+
+```bash
+docker run --rm \
+  -v /path/to/project:/project \
+  -v /path/to/output:/output \
+  ghcr.io/oss-review-toolkit/ort analyze -i /project -o /output
+```
+
+<Tip>
+  Replace `ort` with `ort-minimal` in any of the commands above to use the smaller image.
+</Tip>
+
+  </Tab>
+  <Tab title="Build from source">
+
+Building from source gives you the latest unreleased changes and lets you customize ORT.
+
+**Prerequisites:**
+
+- Git (any recent version)
+- Java Development Kit (JDK) 21 or later — set `JAVA_HOME` accordingly
+
+<Steps>
+  <Step title="Clone the repository">
+
+```bash
+git clone https://github.com/oss-review-toolkit/ort
+cd ort
+```
+
+If you intend to run the test suite, also initialize the submodules:
+
+```bash
+git submodule update --init --recursive
+```
+
+  </Step>
+  <Step title="Build the CLI distribution">
+
+```bash
+./gradlew :cli:installDist
+```
+
+On the first run, Gradle bootstraps itself and downloads all dependencies. This may take several minutes.
+
+The ORT binary is created at:
+
+```
+cli/build/install/ort/bin/ort
+```
+
+  </Step>
+  <Step title="Verify the build">
+
+```bash
+./cli/build/install/ort/bin/ort --help
+```
+
+You can also run ORT directly through Gradle without installing:
+
+```bash
+./gradlew -q :cli:run --args="--help"
+```
+
+<Note>
+  When running via Gradle, ORT's working directory is the `cli/` subproject directory, not the root of the repository. See [gradle/gradle#6074](https://github.com/gradle/gradle/issues/6074) for details.
+</Note>
+
+  </Step>
+</Steps>
+
+**Build the Docker image from source:**
+
+Install Docker 18.09 or later and make sure the Docker daemon is running.
+
+<Warning>
+  Docker BuildKit must be enabled before building the ORT image. See the [Docker BuildKit documentation](https://docs.docker.com/develop/develop-images/build_enhancements/#to-enable-buildkit-builds) for instructions.
+</Warning>
+
+```bash
+docker build -t ort .
+```
+
+Alternatively, use the helper script that also sets the ORT version from the Git revision:
+
+```bash
+scripts/docker_build.sh
+```
+
+Once built, run it with:
+
+```bash
+docker run ort --help
+```
+
+  </Tab>
+</Tabs>
+
+---
+
+## Shell completion
+
+ORT supports shell completion via the `--generate-completion` flag. Pass the shell name to print the completion script, then source it:
+
+<CodeGroup>
+
+```bash Bash
+ort --generate-completion bash >> ~/.bashrc
+source ~/.bashrc
+```
+
+```bash Zsh
+ort --generate-completion zsh >> ~/.zshrc
+source ~/.zshrc
+```
+
+```bash Fish
+ort --generate-completion fish > ~/.config/fish/completions/ort.fish
+```
+
+</CodeGroup>
+
+---
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/getting-started/quickstart">
+    Run your first end-to-end compliance scan
+  </Card>
+  <Card title="Runtime requirements" icon="circle-check" href="/tools/analyzer">
+    Explore supported package managers and their requirements
+  </Card>
+  <Card title="Docker guide" icon="docker" href="/guides/docker">
+    Tips for running ORT in Docker and CI environments
+  </Card>
+  <Card title="Configuration" icon="gear" href="/configuration/ort-yml">
+    Customize ORT with project and global config files
+  </Card>
+</CardGroup>

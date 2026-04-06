@@ -1,0 +1,323 @@
+---
+title: "Scanners"
+description: "ORT integrates multiple license and copyright scanner backends behind a common API, with built-in caching of scan results."
+---
+
+The ORT scanner wraps multiple license and copyright scanner backends behind a uniform interface. Given an analyzer result, it automatically downloads each dependency's source code and scans it for license and copyright information.
+
+Scanners fall into two categories:
+
+- **Recommended** — thoroughly tested integrations suitable for production use.
+- **Reference implementations** — functional integrations maintained as examples or for specific use cases.
+
+<Tip>
+For a detailed comparison of open source license scanners, see this [Bachelor Thesis from FAU Erlangen-Nürnberg](https://osr.cs.fau.de/2019/08/07/final-thesis-a-comparison-study-of-open-source-license-crawler/).
+</Tip>
+
+## Recommended scanners
+
+<AccordionGroup>
+
+<Accordion title="ScanCode">
+
+[ScanCode](https://github.com/aboutcode-org/scancode-toolkit) is the most widely used open source license scanner. It runs locally and performs deep file-by-file analysis to detect licenses, copyrights, and package metadata.
+
+**Configuration**
+
+```yaml
+ort:
+  scanner:
+    config:
+      ScanCode:
+        options:
+          # CLI flags that affect the scan output (changing these invalidates cached results)
+          commandLine: '--copyright,--license,--info,--strip-root,--timeout,300'
+
+          # CLI flags that do not affect the output (e.g. performance tuning)
+          commandLineNonConfig: '--processes,4'
+
+          # Use per-file license findings instead of per-line findings
+          preferFileLicense: false
+
+          # Only reuse cached results from ScanCode versions in this range
+          minVersion: '3.2.1-rc2'
+          maxVersion: '32.0.0'
+```
+
+**Usage**
+
+```bash
+ort scan \
+  -i analyzer-result.yml \
+  -o scan-results/ \
+  --scanners ScanCode
+```
+
+</Accordion>
+
+<Accordion title="FossID">
+
+[FossID](https://fossid.com/) is a commercial snippet scanner that runs as a remote service. It is particularly effective at identifying license obligations in code fragments and detecting copied snippets. ORT communicates with a FossID server instance over its REST API.
+
+**Configuration**
+
+```yaml
+ort:
+  scanner:
+    config:
+      FossId:
+        options:
+          serverUrl: 'https://fossid.example.com/instance/'
+
+          projectName: 'My Project'
+          namingScanPattern: '#projectName_#repositoryName_#currentTimestamp_#deltaTag_#branch'
+
+          # If false, ORT returns immediately and polls for completion
+          waitForResult: false
+
+          # Delta scanning: only scan files changed since the last scan
+          deltaScans: true
+          deltaScanLimit: 10
+
+          detectLicenseDeclarations: true
+          detectCopyrightStatements: true
+
+          # Timeout per file in seconds
+          timeout: 60
+
+          # Map repository URLs before sending to FossID
+          urlMappings: "https://my-repo.example.org(?<repoPath>.*) -> ssh://my-mapped-repo.example.org${repoPath}"
+
+          # Snippet detection sensitivity (1–20)
+          sensitivity: 10
+
+          keepFailedScans: false
+          treatPendingIdentificationsAsError: false
+
+        secrets:
+          user: user
+          apiKey: XYZ
+```
+
+<Note>
+FossID does not use ORT's standard scan storage backends. It maintains its own server-side result store.
+</Note>
+
+</Accordion>
+
+</AccordionGroup>
+
+## Reference implementations
+
+<AccordionGroup>
+
+<Accordion title="Askalono">
+
+[Askalono](https://github.com/jpeddicord/askalono) is a fast, lightweight license detection tool written in Rust. It identifies licenses by comparing file content against a corpus of known license texts. Suitable for quick scans where deep snippet analysis is not required.
+
+**Usage**
+
+```bash
+ort scan \
+  -i analyzer-result.yml \
+  -o scan-results/ \
+  --scanners Askalono
+```
+
+</Accordion>
+
+<Accordion title="Licensee">
+
+[Licensee](https://github.com/licensee/licensee) is the license detection library used by GitHub for repository license badges. It uses a similarity algorithm to match license files against known SPDX licenses.
+
+**Usage**
+
+```bash
+ort scan \
+  -i analyzer-result.yml \
+  -o scan-results/ \
+  --scanners Licensee
+```
+
+</Accordion>
+
+<Accordion title="SCANOSS">
+
+[SCANOSS](https://www.scanoss.com/) is an open source snippet scanner and knowledge base. It matches source code snippets against the SCANOSS OSS Knowledge Base and reports license and provenance information.
+
+**Configuration**
+
+```yaml
+ort:
+  scanner:
+    config:
+      SCANOSS:
+        options:
+          apiUrl: 'https://api.osskb.org/'
+        secrets:
+          apiKey: 'your API key'
+```
+
+</Accordion>
+
+<Accordion title="DOS (Double Open Server)">
+
+The DOS scanner wrapper is a client for [Double Open Server (DOS)](https://github.com/doubleopen-project/dos). Scans are performed server-side by ScanCode, and DOS implements delta scanning — only files that have changed since the last scan are processed. Other ORT scan storages are not used by this scanner.
+
+**Configuration**
+
+```yaml
+ort:
+  scanner:
+    config:
+      DOS:
+        options:
+          url: '${DOS_SERVER_URL}'
+          frontendUrl: '${DOS_FRONTEND_URL}'
+        secrets:
+          token: '${DOS_SERVER_TOKEN}'
+```
+
+`DOS_SERVER_URL`, `DOS_FRONTEND_URL`, and `DOS_SERVER_TOKEN` are resolved from environment variables. The `frontendUrl` points to the Clearance UI, which can be used to inspect results and create license finding curations.
+
+</Accordion>
+
+</AccordionGroup>
+
+## Scan storage backends
+
+To avoid downloading and re-scanning the same source code repeatedly, ORT supports pluggable storage backends for caching scan results. Before scanning a package, ORT checks each configured storage in order; if a matching result is found, it is reused. After a scan completes, results are written to all configured writer storages.
+
+Storage backends are declared in the `storages` section of the ORT configuration file and then referenced by name in `storageReaders` and `storageWriters`.
+
+```yaml
+ort:
+  scanner:
+    storageReaders: [local, postgres, clearlyDefined]
+    storageWriters: [postgres]
+```
+
+Readers are queried in order — the first match wins. Writers all receive the result regardless of order.
+
+<AccordionGroup>
+
+<Accordion title="Local file storage">
+
+The default backend. Scan results are stored as compressed files on the local file system. By default, results are written to `~/.ort/scanner/scan-results`.
+
+```yaml
+ort:
+  scanner:
+    storages:
+      local:
+        backend:
+          localFileStorage:
+            directory: ~/.ort/scanner/results
+            compression: false
+
+    storageReaders: [local]
+    storageWriters: [local]
+```
+
+</Accordion>
+
+<Accordion title="HTTP storage">
+
+Any HTTP file server can serve as a storage backend. Custom headers allow you to pass authentication tokens. The example below uses JFrog Artifactory.
+
+```yaml
+ort:
+  scanner:
+    storages:
+      artifactoryStorage:
+        backend:
+          httpFileStorage:
+            url: "https://artifactory.domain.com/artifactory/repository/scan-results"
+            headers:
+              X-JFrog-Art-Api: "api-token"
+
+    storageReaders: [artifactoryStorage]
+    storageWriters: [artifactoryStorage]
+```
+
+</Accordion>
+
+<Accordion title="AWS S3 storage">
+
+Store scan results in an Amazon S3 bucket (or any S3-compatible object store).
+
+```yaml
+ort:
+  scanner:
+    storages:
+      aws:
+        backend:
+          s3FileStorage:
+            accessKeyId: "accessKey"
+            secretAccessKey: "secret"
+            awsRegion: "us-east-1"
+            bucketName: "ort-scan-results"
+            compression: false
+            # Required for non-AWS S3 providers that don't support DNS-style access
+            pathStyleAccess: false
+
+    storageReaders: [aws]
+    storageWriters: [aws]
+```
+
+</Accordion>
+
+<Accordion title="PostgreSQL storage">
+
+Store scan results in a PostgreSQL database (version 9.4+). ORT creates a `scan_results` table automatically. The database itself must already exist.
+
+```yaml
+ort:
+  scanner:
+    storages:
+      postgres:
+        connection:
+          url: "jdbc:postgresql://example.com:5444/database"
+          schema: "public"
+          username: "username"
+          password: "password"
+          sslmode: "verify-full"
+        # Group results by repository revision (PROVENANCE_BASED) or by package (PACKAGE_BASED)
+        type: PROVENANCE_BASED
+
+    storageReaders: [postgres]
+    storageWriters: [postgres]
+```
+
+`PROVENANCE_BASED` storage is generally more efficient for repositories that provide many packages, because a single revision is only scanned once.
+
+</Accordion>
+
+<Accordion title="ClearlyDefined storage">
+
+[ClearlyDefined](https://clearlydefined.io) is a community-curated store of open source component metadata, including scan results. This backend is **read-only** — ORT will not upload results to ClearlyDefined.
+
+```yaml
+ort:
+  scanner:
+    storages:
+      clearlyDefined:
+        serverUrl: "https://api.clearlydefined.io"
+
+    storageReaders: [clearlyDefined]
+```
+
+</Accordion>
+
+</AccordionGroup>
+
+## Running the scanner
+
+```bash
+ort scan \
+  -i analyzer-result.yml \
+  -o scan-results/ \
+  --scanners ScanCode
+```
+
+The output file `scan-results/scanner-result.yml` extends the analyzer result with per-package scan findings and serves as the input for the evaluator and reporter.

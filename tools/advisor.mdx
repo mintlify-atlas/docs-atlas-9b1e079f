@@ -1,0 +1,148 @@
+---
+title: "Advisor"
+description: "Query security advisory databases to find known vulnerabilities in your dependencies."
+---
+
+The advisor takes an analyzer result and queries one or more vulnerability databases for all identified packages. It appends security advisory data — CVE IDs, severity scores, affected version ranges, and fix recommendations — to the ORT result file.
+
+## Prerequisites
+
+- An `analyzer-result.yml` (or a combined result from a previous scan run) produced by the [analyzer](/tools/analyzer).
+- At least one advisory provider enabled via `--advisors`.
+
+## CLI usage
+
+```bash
+ort advise -i <ort-result.yml> -o <output-dir> -a <providers> [options]
+```
+
+| Flag | Short | Description |
+|---|---|---|
+| `--ort-file` | `-i` | ORT result file with an analyzer result (required). |
+| `--output-dir` | `-o` | Directory where `advisor-result.yml` is written (required). |
+| `--advisors` | `-a` | Comma-separated list of advisory providers to enable (required). |
+| `--output-formats` | `-f` | Comma-separated output formats: `YAML` (default) or `JSON`. |
+| `--label` | `-l` | Set a key=value label in the result. Repeatable. |
+| `--resolutions-file` | | File containing issue resolutions. |
+
+<Note>
+The `--skip-excluded` flag is deprecated. Use `ort -P ort.advisor.skipExcluded=true advise` to skip excluded packages.
+</Note>
+
+## Real example
+
+```bash
+ort advise \
+  -i /results/scanner/scan-result.yml \
+  -o /results/advisor \
+  -a OSV,OssIndex \
+  -f YAML
+```
+
+## Advisory providers
+
+<CardGroup cols={2}>
+  <Card title="OSV" icon="bug">
+    Google's [Open Source Vulnerabilities](https://osv.dev/) database. Aggregates CVE and ecosystem-specific advisories across npm, PyPI, Maven, Go, Rust, and more. No configuration required.
+  </Card>
+  <Card title="OSS Index" icon="database">
+    Sonatype's [OSS Index](https://ossindex.sonatype.org/). Covers a wide range of ecosystems. No configuration required; review the terms of service before use.
+  </Card>
+  <Card title="VulnerableCode" icon="shield-alert">
+    Self-hosted [VulnerableCode](https://github.com/aboutcode-org/vulnerablecode) instance. Requires a running server; no authentication needed.
+  </Card>
+  <Card title="Black Duck" icon="lock">
+    Commercial provider from Synopsys. Requires a Black Duck server URL and API token. Currently in experimental state.
+  </Card>
+</CardGroup>
+
+## Provider configuration
+
+Provider-specific settings go in the `advisor` section of the ORT configuration file.
+
+<Tabs>
+  <Tab title="OSV">
+    No configuration is required. Optionally override the server URL to target a staging instance:
+
+    ```yaml
+    ort:
+      advisor:
+        config:
+          osv:
+            options:
+              serverUrl: "https://api-staging.osv.dev"
+    ```
+
+    Enable with: `-a OSV`
+  </Tab>
+  <Tab title="OSS Index">
+    Uses the public API at `https://ossindex.sonatype.org/`. No configuration is needed.
+
+    Enable with: `-a OssIndex`
+  </Tab>
+  <Tab title="VulnerableCode">
+    Point to your VulnerableCode instance:
+
+    ```yaml
+    ort:
+      advisor:
+        config:
+          vulnerableCode:
+            options:
+              serverUrl: "http://localhost:8000"
+    ```
+
+    Enable with: `-a VulnerableCode`
+  </Tab>
+  <Tab title="Black Duck">
+    Provide the server URL and API token:
+
+    ```yaml
+    ort:
+      advisor:
+        config:
+          BlackDuck:
+            options:
+              serverUrl: "https://blackduck.example.com"
+            secrets:
+              apiToken: "your-api-token"
+    ```
+
+    Enable with: `-a BlackDuck`
+
+    <Warning>
+    The Black Duck integration is experimental. Results may be incomplete depending on the ecosystem.
+    </Warning>
+  </Tab>
+</Tabs>
+
+## Output format
+
+The advisor appends an `advisor` block to the ORT result. Each package entry lists all vulnerabilities found across all queried providers:
+
+```yaml
+advisor:
+  startTime: "2024-01-15T11:00:00Z"
+  endTime: "2024-01-15T11:01:05Z"
+  results:
+    "Maven:org.apache.logging.log4j:log4j-core:2.14.1":
+      - advisor:
+          name: "OSV"
+          capabilities:
+            - VULNERABILITIES
+        summary:
+          startTime: "2024-01-15T11:00:02Z"
+          endTime: "2024-01-15T11:00:04Z"
+          vulnerabilities:
+            - id: "CVE-2021-44228"
+              references:
+                - url: "https://osv.dev/vulnerability/GHSA-jfh8-c2jp-x5vm"
+                  scoringSystem: "CVSS3"
+                  severity: "CRITICAL"
+                  score: 10.0
+              summary: "Remote code execution via JNDI lookup in log messages (Log4Shell)"
+```
+
+<Tip>
+Use the [evaluator](/tools/evaluator) to write policy rules that fail the build when vulnerabilities above a certain CVSS score are found.
+</Tip>

@@ -1,0 +1,381 @@
+---
+title: "Evaluator Rules"
+description: "Write custom policy rules in a Kotlin DSL script (evaluator.rules.kts) to enforce license compliance, detect vulnerabilities, and validate project structure."
+---
+
+The evaluator runs a Kotlin script (`evaluator.rules.kts`) against ORT scan results to enforce your organization's compliance policy. Rules are written in a Kotlin-based DSL that provides access to packages, licenses, dependencies, and the full ORT result.
+
+<Note>
+The example rules file described here depends on the license categories defined in [`license-classifications.yml`](/configuration/license-classifications). Define your categories there before referencing them in rules.
+</Note>
+
+---
+
+## How it works
+
+The evaluator script is executed after the scanner produces results. It:
+
+1. Iterates over packages, dependencies, and projects.
+2. Evaluates each rule's `require` block to check preconditions.
+3. Calls `error()`, `warning()`, or `issue()` to report violations.
+4. Collects all violations into `ruleViolations`.
+
+The reporter then uses resolutions (from `.ort.yml` or `resolutions.yml`) to determine which violations to display.
+
+---
+
+## File location and command line
+
+Place the rules file at `$ORT_CONFIG_DIR/evaluator.rules.kts` or pass it explicitly:
+
+```bash
+cli/build/install/ort/bin/ort evaluate \
+  -i [scanner-output-dir]/scan-result.yml \
+  -o [evaluator-output-dir] \
+  --license-classifications-file $ORT_CONFIG_DIR/license-classifications.yml \
+  --package-curations-file $ORT_CONFIG_DIR/curations.yml \
+  --rules-file $ORT_CONFIG_DIR/evaluator.rules.kts
+```
+
+---
+
+## Script structure
+
+A rules file has three parts: imports/setup, rule function definitions, and the `ruleSet` invocation.
+
+```kotlin
+// 1. Import license classifications from license-classifications.yml
+val permissiveLicenses = licenseClassifications.licensesByCategory["permissive"].orEmpty()
+val copyleftLicenses = licenseClassifications.licensesByCategory["copyleft"].orEmpty()
+
+// 2. Define rules as extension functions on RuleSet
+fun RuleSet.myRule() = packageRule("MY_RULE") {
+    require {
+        -isExcluded()
+    }
+    licenseRule("MY_LICENSE_RULE", LicenseView.CONCLUDED_OR_DECLARED_AND_DETECTED) {
+        require {
+            -isExcluded()
+        }
+        error("Found license $license in ${pkg.metadata.id.toCoordinates()}.", howToFixDefault())
+    }
+}
+
+// 3. Build the rule set and populate ruleViolations
+val ruleSet = ruleSet(ortResult, licenseInfoResolver, resolutionProvider) {
+    myRule()
+}
+ruleViolations += ruleSet.violations
+```
+
+---
+
+## Rule types
+
+<AccordionGroup>
+  <Accordion title="packageRule — per-package checks">
+    Executes once for each package. Use it to check licenses, flags, or metadata.
+
+    ```kotlin
+    fun RuleSet.unhandledLicenseRule() = packageRule("UNHANDLED_LICENSE") {
+        require {
+            -isExcluded()
+        }
+
+        licenseRule("UNHANDLED_LICENSE", LicenseView.CONCLUDED_OR_DECLARED_AND_DETECTED) {
+            require {
+                -isExcluded()
+                -isHandled()
+            }
+
+            error(
+                "The license $license is currently not covered by policy rules. " +
+                    "The license was ${licenseSource.name.lowercase()} in package " +
+                    "${pkg.metadata.id.toCoordinates()}.",
+                howToFixDefault()
+            )
+        }
+    }
+    ```
+
+    Inside `packageRule`, you have access to:
+    - `pkg` — the current `CuratedPackage`
+    - `resolvedLicenseInfo` — resolved license information with all sources
+    - `licenseRule(name, view)` — iterate over licenses for the package
+  </Accordion>
+
+  <Accordion title="dependencyRule — per-dependency checks">
+    Executes for each dependency of each project. Useful for checking transitive license propagation.
+
+    ```kotlin
+    fun RuleSet.copyleftInDependencyRule() = dependencyRule("COPYLEFT_IN_DEPENDENCY") {
+        licenseRule("COPYLEFT_IN_DEPENDENCY", LicenseView.CONCLUDED_OR_DECLARED_OR_DETECTED) {
+            require {
+                +isCopyleft()
+            }
+
+            issue(
+                Severity.ERROR,
+                "The project ${project.id.toCoordinates()} has a dependency licensed under the " +
+                    "ScanCode copyleft categorized license $license.",
+                howToFixDefault()
+            )
+        }
+    }
+
+    fun RuleSet.copyleftLimitedInDependencyRule() = dependencyRule("COPYLEFT_LIMITED_IN_DEPENDENCY_RULE") {
+        require {
+            +isAtTreeLevel(0)        // direct dependencies only
+            +isStaticallyLinked()
+        }
+
+        licenseRule("COPYLEFT_LIMITED_IN_DEPENDENCY_RULE", LicenseView.CONCLUDED_OR_DECLARED_OR_DETECTED) {
+            require {
+                +isCopyleftLimited()
+            }
+
+            issue(
+                Severity.WARNING,
+                "The project ${project.id.toCoordinates()} has a statically linked direct dependency " +
+                    "licensed under the copyleft-limited license $license.",
+                howToFixDefault()
+            )
+        }
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="projectSourceRule — project file checks">
+    Executes once per project and has access to the project's source files. Use it to enforce repository structure requirements.
+
+    ```kotlin
+    fun RuleSet.missingReadmeFileRule() = projectSourceRule("MISSING_README_FILE") {
+        require {
+            -projectSourceHasFile("README.md")
+        }
+
+        error("The project's code repository does not contain the file 'README.md'.")
+    }
+
+    fun RuleSet.dependencyInProjectSourceRule() = projectSourceRule("DEPENDENCY_IN_PROJECT_SOURCE_RULE") {
+        val denyDirPatterns = listOf(
+            "**/node_modules" to setOf("NPM", "Yarn", "PNPM"),
+            "**/vendor" to setOf("GoMod")
+        )
+
+        denyDirPatterns.forEach { (pattern, packageManagers) ->
+            val offendingDirs = projectSourceFindDirectories(pattern)
+
+            if (offendingDirs.isNotEmpty()) {
+                issue(
+                    Severity.ERROR,
+                    "The directories ${offendingDirs.joinToString()} belong to the package " +
+                        "manager(s) ${packageManagers.joinToString()} and must not be committed.",
+                    "Please delete the directories: ${offendingDirs.joinToString()}."
+                )
+            }
+        }
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="ortResultRule — global single-execution checks">
+    Executes once per evaluation. Use it for checks on the overall ORT result, such as deprecated configuration.
+
+    ```kotlin
+    fun RuleSet.deprecatedScopeExcludeReasonInOrtYmlRule() =
+        ortResultRule("DEPRECATED_SCOPE_EXCLUDE_REASON_IN_ORT_YML") {
+            val reasons = ortResult.repository.config.excludes.scopes
+                .mapTo(mutableSetOf()) { it.reason }
+
+            @Suppress("DEPRECATION")
+            val deprecatedReasons = setOf(ScopeExcludeReason.TEST_TOOL_OF)
+
+            reasons.intersect(deprecatedReasons).forEach { offendingReason ->
+                warning(
+                    "The repository configuration is using the deprecated scope exclude reason '$offendingReason'.",
+                    "Please use only non-deprecated scope exclude reasons."
+                )
+            }
+        }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Rule matchers
+
+The `require` block in each rule uses `RuleMatcher` objects. Prefix with `+` (must match) or `-` (must not match).
+
+<AccordionGroup>
+  <Accordion title="Built-in matchers">
+    **Package-level matchers:**
+    - `isExcluded()` — the package is excluded via path/scope excludes
+    - `hasVulnerability()` — the package has any known vulnerability
+    - `hasVulnerability(score, scoringSystem)` — vulnerability above a severity threshold
+
+    **Dependency-level matchers:**
+    - `isAtTreeLevel(n)` — the dependency is at depth `n` (0 = direct dependency)
+    - `isStaticallyLinked()` — the dependency is statically linked
+
+    **Project source matchers:**
+    - `projectSourceHasFile(vararg paths)` — any of the given files exist in the project source
+    - `projectSourceHasDirectory(vararg paths)` — any of the given directories exist
+
+    **Combining matchers:**
+    ```kotlin
+    require {
+        -AnyOf(
+            projectSourceHasFile(".travis.yml", ".github/workflows"),
+            projectSourceHasDirectory(".circleci")
+        )
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Custom matchers">
+    Implement the `RuleMatcher` interface to create reusable custom matchers:
+
+    ```kotlin
+    fun PackageRule.LicenseRule.isCopyleft() =
+        object : RuleMatcher {
+            override val description = "isCopyleft($license)"
+            override fun matches() = license in copyleftLicenses
+        }
+
+    fun PackageRule.LicenseRule.isHandled() =
+        object : RuleMatcher {
+            override val description = "isHandled($license)"
+            override fun matches() =
+                license in handledLicenses &&
+                    ("-exception" !in license.toString() || " WITH " in license.toString())
+        }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Reporting violations
+
+Three functions are available within a rule body to report results:
+
+| Function | Severity | Use when |
+|---|---|---|
+| `error(message, howToFix)` | `ERROR` | A policy violation that must be resolved |
+| `warning(message, howToFix)` | `WARNING` | A potential issue that should be reviewed |
+| `issue(severity, message, howToFix)` | Custom | Explicit severity control |
+
+The `howToFix` parameter accepts Markdown text that is rendered in supported report formats to guide developers in resolving the violation.
+
+```kotlin
+fun PackageRule.howToFixDefault() = """
+    A text written in Markdown to help users resolve policy violations.
+    It may link to additional resources or internal documentation.
+""".trimIndent()
+```
+
+---
+
+## LicenseView
+
+`licenseRule` accepts a `LicenseView` that controls which license sources are considered:
+
+| View | Description |
+|---|---|
+| `LicenseView.CONCLUDED_OR_DECLARED_AND_DETECTED` | Concluded license if set, otherwise declared and detected |
+| `LicenseView.CONCLUDED_OR_DECLARED_OR_DETECTED` | Concluded if set, otherwise declared if set, otherwise detected |
+| `LicenseView.ONLY_CONCLUDED` | Only the concluded license |
+| `LicenseView.ONLY_DECLARED` | Only declared licenses |
+| `LicenseView.ONLY_DETECTED` | Only scanner-detected licenses |
+
+---
+
+## Full example
+
+The following example covers the most common compliance checks:
+
+```kotlin
+val permissiveLicenses = licenseClassifications.licensesByCategory["permissive"].orEmpty()
+val copyleftLicenses = licenseClassifications.licensesByCategory["copyleft"].orEmpty()
+val copyleftLimitedLicenses = licenseClassifications.licensesByCategory["copyleft-limited"].orEmpty()
+val publicDomainLicenses = licenseClassifications.licensesByCategory["public-domain"].orEmpty()
+
+val handledLicenses = listOf(
+    permissiveLicenses,
+    publicDomainLicenses,
+    copyleftLicenses,
+    copyleftLimitedLicenses
+).flatten().toSet()
+
+fun PackageRule.howToFixDefault() = """
+    See internal compliance documentation at https://intranet.example.com/oss-compliance.
+""".trimIndent()
+
+fun PackageRule.LicenseRule.isHandled() =
+    object : RuleMatcher {
+        override val description = "isHandled($license)"
+        override fun matches() =
+            license in handledLicenses && ("-exception" !in license.toString() || " WITH " in license.toString())
+    }
+
+fun PackageRule.LicenseRule.isCopyleft() =
+    object : RuleMatcher {
+        override val description = "isCopyleft($license)"
+        override fun matches() = license in copyleftLicenses
+    }
+
+fun RuleSet.unhandledLicenseRule() = packageRule("UNHANDLED_LICENSE") {
+    require { -isExcluded() }
+
+    licenseRule("UNHANDLED_LICENSE", LicenseView.CONCLUDED_OR_DECLARED_AND_DETECTED) {
+        require {
+            -isExcluded()
+            -isHandled()
+        }
+        error(
+            "The license $license is not covered by policy rules. " +
+                "Found in package ${pkg.metadata.id.toCoordinates()}.",
+            howToFixDefault()
+        )
+    }
+}
+
+fun RuleSet.copyleftInSourceRule() = packageRule("COPYLEFT_IN_SOURCE") {
+    require { -isExcluded() }
+
+    licenseRule("COPYLEFT_IN_SOURCE", LicenseView.CONCLUDED_OR_DECLARED_AND_DETECTED) {
+        require {
+            -isExcluded()
+            +isCopyleft()
+        }
+        error(
+            "Package ${pkg.metadata.id.toCoordinates()} has copyleft license $license.",
+            howToFixDefault()
+        )
+    }
+}
+
+fun RuleSet.highSeverityVulnerabilityInPackageRule() = packageRule("HIGH_SEVERITY_VULNERABILITY_IN_PACKAGE") {
+    val scoreThreshold = 5.0f
+    val scoringSystem = "CVSS:3.1"
+    require {
+        -isExcluded()
+        +hasVulnerability(scoreThreshold, scoringSystem)
+    }
+    issue(
+        Severity.ERROR,
+        "Package ${pkg.metadata.id.toCoordinates()} has a $scoringSystem severity > $scoreThreshold vulnerability.",
+        howToFixDefault()
+    )
+}
+
+val ruleSet = ruleSet(ortResult, licenseInfoResolver, resolutionProvider) {
+    unhandledLicenseRule()
+    copyleftInSourceRule()
+    highSeverityVulnerabilityInPackageRule()
+}
+
+ruleViolations += ruleSet.violations
+```

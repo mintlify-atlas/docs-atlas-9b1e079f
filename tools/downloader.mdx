@@ -1,0 +1,156 @@
+---
+title: "Downloader"
+description: "Retrieve the source code of all dependencies from VCS or archive URLs for scanning and archiving."
+---
+
+The downloader fetches source code for all packages identified in an analyzer result. It normalizes repository URLs, detects the appropriate VCS tool, and checks out the exact revision recorded during analysis. It can also download from a single URL directly, without needing an ORT result file.
+
+The [scanner](/tools/scanner) invokes the downloader automatically; you only need to run it manually when you want to inspect or archive source code separately.
+
+## Prerequisites
+
+- An `analyzer-result.yml` produced by the [analyzer](/tools/analyzer), **or** a direct VCS/archive URL passed via `--project-url`.
+
+## CLI usage
+
+```bash
+ort download -i <analyzer-result.yml> -o <output-dir> [options]
+# or
+ort download --project-url <url> -o <output-dir> [options]
+```
+
+| Flag | Short | Description |
+|---|---|---|
+| `--ort-file` | `-i` | ORT result file with an analyzer result. Mutually exclusive with `--project-url`. |
+| `--project-url` | | A direct VCS or archive URL to download. Mutually exclusive with `--ort-file`. |
+| `--output-dir` | `-o` | Directory to write source code into (required). |
+| `--package-types` | | Limit downloads to `PACKAGE`, `PROJECT`, or both (default: both). |
+| `--package-ids` | | Comma-separated regular expressions to match package IDs. Only matching packages are downloaded. |
+| `--project-name` | | Override the project name when using `--project-url`. |
+| `--vcs-type` | | Override the VCS type when using `--project-url` (e.g., `Git`, `Mercurial`). |
+| `--vcs-revision` | | Override the VCS revision when using `--project-url`. |
+| `--vcs-path` | | Limit checkout to a sub-path of the repository. |
+| `--archive` | | Create one ZIP archive per downloaded package entity. |
+| `--archive-all` | | Create a single `archive.zip` containing all downloaded source code. |
+| `--max-parallel-downloads` | `-p` | Maximum parallel downloads (default: `8`). |
+| `--dry-run` | | Verify all source locations without downloading anything. |
+| `--license-classifications-file` | | Limit downloads to packages whose license belongs to the specified categories. |
+
+<Note>
+The `--skip-excluded` flag is deprecated. Use `ort -P ort.downloader.skipExcluded=true download` instead.
+</Note>
+
+## Real examples
+
+<CodeGroup>
+
+```bash From analyzer result
+ort download \
+  -i /results/analyzer/analyzer-result.yml \
+  -o /sources \
+  --package-types PACKAGE \
+  -p 4
+```
+
+```bash From a direct URL
+ort download \
+  --project-url https://github.com/apache/commons-lang.git \
+  --vcs-revision rel/commons-lang-3.12.0 \
+  -o /sources/commons-lang
+```
+
+```bash With archiving
+ort download \
+  -i /results/analyzer/analyzer-result.yml \
+  -o /sources \
+  --archive-all
+```
+
+</CodeGroup>
+
+## Supported VCS types
+
+ORT detects the VCS type from the URL automatically. The following systems are supported:
+
+| VCS | Notes |
+|---|---|
+| **Git** | Default for GitHub, GitLab, Bitbucket, and most `https://*.git` URLs. |
+| **Git-Repo** | Android-style multi-repository checkouts using a manifest. |
+| **Mercurial** | Detected from Bitbucket `hg` URLs or explicit `--vcs-type Mercurial`. |
+| **Subversion** | Detected from `svn+ssh://` or `https://svn.*` URLs. |
+
+### VCS type detection
+
+When a `--project-url` is given, the downloader uses `VersionControlSystem.forUrl()` to probe the URL and determine the correct VCS tool. You can override auto-detection with `--vcs-type`:
+
+```bash
+ort download \
+  --project-url https://svn.example.com/repos/my-lib/trunk \
+  --vcs-type Subversion \
+  --vcs-revision 12345 \
+  -o /sources/my-lib
+```
+
+When downloading from an ORT result, the VCS info recorded by the analyzer (including the exact commit hash or tag) is used automatically.
+
+## How curations affect downloads
+
+Package curations in `.ort.yml` or a curations file can correct or supplement VCS metadata before the downloader runs. For example, if a package's declared `vcsUrl` points to a monorepo root but the actual sources are in a subdirectory, a curation can add the correct `vcsPath`:
+
+```yaml
+curations:
+  packages:
+    - id: "NPM::lodash:4.17.21"
+      curations:
+        vcs:
+          type: "Git"
+          url: "https://github.com/lodash/lodash.git"
+          revision: "4.17.21"
+          path: ""
+        comment: "Fix incorrect VCS path from package metadata."
+```
+
+The downloader reads the resolved (curated) VCS information from the analyzer result, so no special flags are required.
+
+## Filtering downloads by license category
+
+You can restrict downloads to packages whose effective license belongs to a specific category defined in your `license-classifications.yml`. Configure the allowed categories in `ort.yml` and pass the classifications file:
+
+```yaml
+ort:
+  downloader:
+    includedLicenseCategories:
+      - "permissive"
+      - "public-domain"
+```
+
+```bash
+ort download \
+  -i /results/analyzer/analyzer-result.yml \
+  -o /sources \
+  --license-classifications-file /ort-config/license-classifications.yml
+```
+
+Only packages whose licenses fall into `permissive` or `public-domain` will be downloaded.
+
+## Output structure
+
+Downloaded source code is placed under `<output-dir>/<type>/<namespace>/<name>/<version>/`. For example:
+
+```
+/sources/
+  Maven/
+    org.apache.commons/
+      commons-lang3/
+        3.12.0/
+          src/
+          pom.xml
+          LICENSE.txt
+  NPM/
+    /
+      lodash/
+        4.17.21/
+          ...
+```
+
+When `--archive` is used, each entry becomes a ZIP file alongside the extracted directory. With `--archive-all`, a single `archive.zip` is written to the output root.

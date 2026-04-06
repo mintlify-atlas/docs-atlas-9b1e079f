@@ -1,0 +1,168 @@
+---
+title: "Advisors"
+description: "ORT's advisor queries vulnerability databases to find known security issues in the packages identified by the analyzer."
+---
+
+The advisor takes the analyzer result as input and queries one or more vulnerability data providers for each package. It enriches the ORT result with vulnerability metadata including CVE identifiers, severity scores, affected version ranges, and links to advisories.
+
+Select providers to enable on the command line with the `--advisors` (or `-a`) flag, passing a comma-separated list of provider IDs:
+
+```bash
+ort advise \
+  -i analyzer-result.yml \
+  -o advisory-result/ \
+  -a OSV,OssIndex
+```
+
+Provider configuration lives under the `advisor.config` section in the ORT configuration file.
+
+<Note>
+Excluded scopes and paths are skipped by the advisor by default. Set `skipExcluded: false` under `ort.advisor` to include them.
+</Note>
+
+## Providers
+
+<AccordionGroup>
+
+<Accordion title="OSV">
+
+[OSV](https://osv.dev/) is Google's distributed vulnerability database for open source software. It aggregates vulnerability data from multiple upstream sources (GitHub Advisory Database, PyPI, npm, RubyGems, crates.io, Go, Android, Linux kernel, and more) into a single unified schema.
+
+OSV data is freely available with no authentication required.
+
+**Enable:** pass `-a OSV` on the command line.
+
+**Configuration (optional)**
+
+The server URL only needs to be set if you are pointing at a staging or mirror instance.
+
+```yaml
+ort:
+  advisor:
+    config:
+      OSV:
+        options:
+          serverUrl: "https://api.osv.dev"
+```
+
+**Data provided**
+
+- CVE / GHSA / ecosystem-specific vulnerability IDs
+- Affected version ranges
+- Severity (CVSS score when available)
+- Links to upstream advisories and fix commits
+
+</Accordion>
+
+<Accordion title="OSS Index">
+
+[OSS Index](https://ossindex.sonatype.org/) is Sonatype's free vulnerability intelligence service. It covers packages from Maven Central, npm, PyPI, RubyGems, NuGet, and many other ecosystems.
+
+Before using OSS Index, review its [Terms of Service](https://ossindex.sonatype.org/tos).
+
+**Enable:** pass `-a OssIndex` on the command line.
+
+**Configuration (optional)**
+
+The public endpoint requires no credentials. Providing credentials grants higher rate limits.
+
+```yaml
+ort:
+  advisor:
+    config:
+      OssIndex:
+        options:
+          serverUrl: "https://ossindex.sonatype.org/"
+        secrets:
+          username: username
+          password: password
+```
+
+**Data provided**
+
+- CVE identifiers and CVSS scores
+- Affected package version ranges
+- Links to upstream advisories
+
+</Accordion>
+
+<Accordion title="VulnerableCode">
+
+[VulnerableCode](https://github.com/aboutcode-org/vulnerablecode) is an open source vulnerability database from [nexB](https://www.nexb.com/). You can run your own instance or use a public deployment. Authentication is optional — set an `apiKey` if your instance requires it.
+
+**Enable:** pass `-a VulnerableCode` on the command line.
+
+**Configuration**
+
+```yaml
+ort:
+  advisor:
+    config:
+      VulnerableCode:
+        options:
+          serverUrl: "http://localhost:8000"
+          readTimeout: 40
+        secrets:
+          # Only required if the instance enforces authentication
+          apiKey: 0123456789012345678901234567890123456789
+```
+
+**Data provided**
+
+- CVE and PURL-based vulnerability records
+- Affected and fixed version ranges
+- Severity scores and advisory references
+- Coverage across many ecosystems via aggregated upstream feeds
+
+</Accordion>
+
+<Accordion title="Black Duck">
+
+[Black Duck](https://www.synopsys.com/software-integrity/security-testing/software-composition-analysis.html) is Synopsys's commercial software composition analysis platform. ORT's Black Duck advisor queries the Black Duck instance you specify for known vulnerabilities.
+
+<Warning>
+The Black Duck integration is currently in **experimental** state. Behavior may change in future releases.
+</Warning>
+
+Authentication via an API token is mandatory.
+
+**Enable:** pass `-a BlackDuck` on the command line.
+
+**Configuration**
+
+```yaml
+ort:
+  advisor:
+    config:
+      BlackDuck:
+        options:
+          serverUrl: "https://your-blackduck-instance.example.com"
+        secrets:
+          apiToken: "your-api-token"
+```
+
+**Data provided**
+
+- Vulnerability data sourced from the Black Duck KnowledgeBase
+- Coverage for ecosystems documented in the [Black Duck supported ecosystems list](https://github.com/oss-review-toolkit/ort/issues/9638)
+
+</Accordion>
+
+</AccordionGroup>
+
+## Advisory result structure
+
+After running the advisor, the output file contains a `vulnerabilities` entry for each package that has known issues. Each vulnerability record includes:
+
+```yaml
+vulnerabilities:
+  - id: "CVE-2021-44228"
+    references:
+      - url: "https://nvd.nist.gov/vuln/detail/CVE-2021-44228"
+        severity: "CRITICAL"
+        score: 10.0
+        scoringSystem: "CVSS3"
+        source: "OSV"
+```
+
+The `source` field identifies which provider returned each vulnerability, allowing you to trace results back to the original data.

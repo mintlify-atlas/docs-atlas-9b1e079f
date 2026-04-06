@@ -1,0 +1,402 @@
+---
+title: "Repository Configuration (.ort.yml)"
+description: "Per-project ORT configuration file placed at the root of a source code repository to control includes, excludes, resolutions, curations, package configurations, and license choices."
+---
+
+The `.ort.yml` file is placed at the root of a source code repository to configure how ORT treats that specific project. All settings in this file are scoped to the project and override or extend the global configuration.
+
+<Note>
+Global configuration (curations, resolutions, etc.) applies to every scan. Reserve `.ort.yml` for project-specific overrides — keeping global config in the shared config directory increases automation and reduces duplication.
+</Note>
+
+The file supports these top-level sections:
+
+<CardGroup cols={2}>
+  <Card title="Includes" icon="circle-plus" href="/configuration/ort-yml#includes">
+    Mark files, directories, or scopes as included in released artifacts.
+  </Card>
+  <Card title="Excludes" icon="circle-minus" href="/configuration/ort-yml#excludes">
+    Mark files, directories, or scopes as not part of released artifacts.
+  </Card>
+  <Card title="Resolutions" icon="circle-check" href="/configuration/ort-yml#resolutions">
+    Acknowledge and suppress specific issues or policy rule violations.
+  </Card>
+  <Card title="Curations" icon="pen-to-square" href="/configuration/ort-yml#curations">
+    Correct package metadata or license findings within the project.
+  </Card>
+  <Card title="Package Configurations" icon="box" href="/configuration/ort-yml#package-configurations">
+    Apply path excludes or license finding corrections to dependencies.
+  </Card>
+  <Card title="License Choices" icon="scale-balanced" href="/configuration/ort-yml#license-choices">
+    Select a specific license for multi-licensed packages.
+  </Card>
+</CardGroup>
+
+---
+
+## Includes
+
+Includes define which parts of the repository are distributed to third parties. By default ORT analyzes everything it can find. Includes let you restrict the scope to only the relevant portions, for example in a monorepo.
+
+<Note>
+When includes and excludes overlap, excludes take precedence — any path matched by both is treated as excluded.
+</Note>
+
+<AccordionGroup>
+  <Accordion title="Including paths">
+    Path includes mark a complete directory tree as part of the released artifact. Each include requires a `reason` (from [`PathIncludeReason`](https://github.com/oss-review-toolkit/ort/blob/main/model/src/main/kotlin/config/PathIncludeReason.kt)) and an optional `comment`.
+
+    Patterns follow [AntPathMatcher](https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/util/AntPathMatcher.html) glob syntax.
+
+    ```yaml
+    includes:
+      paths:
+      - pattern: "src/**"
+        reason: "SOURCE_OF"
+        comment: "This directory contains the source code of binaries that are distributed."
+    ```
+
+    Effects of the example above:
+    - All projects found under `src/` are marked as included.
+    - License findings in files under `src/` are marked as included.
+  </Accordion>
+
+  <Accordion title="Including scopes">
+    Many package managers group dependencies into named scopes (Maven: `compile`, `test`; NPM: `dependencies`, `devDependencies`). By default all scopes are included. Use scope includes to select only specific ones.
+
+    ```yaml
+    includes:
+      scopes:
+      - pattern: "src.*"
+        reason: "SOURCE_OF"
+        comment: "Source code of delivered packages."
+    ```
+
+    Available reasons are defined in [`ScopeIncludeReason.kt`](https://github.com/oss-review-toolkit/ort/blob/main/model/src/main/kotlin/config/ScopeIncludeReason.kt). Scope includes apply to all projects found during a scan.
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Excludes
+
+Excludes mark files, directories, or dependency scopes as not part of the released artifact — for example build scripts, documentation, or test code.
+
+By default, excluded parts are still analyzed and scanned but are visually distinguished in reports (grayed out, reason shown). To skip excluded elements entirely during analysis and reduce resource usage, set `skip_excluded: true`:
+
+```yaml
+analyzer:
+  skip_excluded: true
+excludes:
+  paths:
+  - pattern: "test-data/**"
+    reason: "TEST_OF"
+    comment: "This directory contains test data which are not distributed."
+```
+
+<AccordionGroup>
+  <Accordion title="Excluding paths">
+    Path excludes use the same glob syntax as path includes. The `reason` must be selected from [`PathExcludeReason`](https://github.com/oss-review-toolkit/ort/blob/main/model/src/main/kotlin/config/PathExcludeReason.kt).
+
+    ```yaml
+    excludes:
+      paths:
+      - pattern: "test-data/**"
+        reason: "TEST_OF"
+        comment: "This directory contains test data which are not distributed."
+      - pattern: "docs/**"
+        reason: "DOCUMENTATION_OF"
+        comment: "Documentation only, not distributed."
+      - pattern: "build.gradle"
+        reason: "BUILD_TOOL_OF"
+        comment: "Gradle build script, not distributed."
+    ```
+  </Accordion>
+
+  <Accordion title="Excluding scopes">
+    Scope excludes use regular expressions for `pattern` and apply to all projects in the scan. The `reason` must be selected from [`ScopeExcludeReason`](https://github.com/oss-review-toolkit/ort/blob/main/model/src/main/kotlin/config/ScopeExcludeReason.kt).
+
+    ```yaml
+    excludes:
+      scopes:
+      - pattern: "test.*"
+        reason: "TEST_DEPENDENCY_OF"
+        comment: "Packages for testing only."
+      - pattern: "devDependencies"
+        reason: "DEV_DEPENDENCY_OF"
+        comment: "Packages for development only. Not part of released artifacts."
+    ```
+
+    The pattern `test.*` matches all Gradle test configurations: `testApi`, `testCompile`, `testImplementation`, `testRuntime`, etc.
+  </Accordion>
+
+  <Accordion title="Real-world example (ORT's own .ort.yml)">
+    This is a condensed version of ORT's own `.ort.yml` showing typical excludes:
+
+    ```yaml
+    excludes:
+      paths:
+      - pattern: "**/src/{:funTest|test}/**"
+        reason: "TEST_OF"
+        comment: >-
+          Licenses contained in this directory are used for testing and do not
+          apply to the OSS Review Toolkit.
+      - pattern: "examples/**"
+        reason: "EXAMPLE_OF"
+        comment: >-
+          This directory contains example files with licenses that do not apply
+          to the OSS Review Toolkit.
+      scopes:
+      - pattern: "(test.*|funTest.*)"
+        reason: "TEST_DEPENDENCY_OF"
+        comment: "Packages for testing only. Not part of released artifacts."
+      - pattern: "devDependencies"
+        reason: "DEV_DEPENDENCY_OF"
+        comment: "Packages for development only. Not part of released artifacts."
+    ```
+  </Accordion>
+
+  <Accordion title="Package manager scope examples">
+    <CodeGroup>
+      ```yaml Gradle
+      excludes:
+        scopes:
+        - pattern: "test.*"
+          reason: "TEST_DEPENDENCY_OF"
+          comment: "Packages for testing only."
+      ```
+
+      ```yaml npm
+      excludes:
+        scopes:
+        - pattern: "devDependencies"
+          reason: "DEV_DEPENDENCY_OF"
+          comment: "Packages for development only."
+      ```
+
+      ```yaml Maven
+      excludes:
+        scopes:
+        - pattern: "test"
+          reason: "TEST_DEPENDENCY_OF"
+          comment: "Maven test scope dependencies."
+        - pattern: "provided"
+          reason: "PROVIDED_BY"
+          comment: "Provided by the runtime environment."
+      ```
+
+      ```yaml Cargo
+      excludes:
+        scopes:
+        - pattern: "dev-dependencies"
+          reason: "DEV_DEPENDENCY_OF"
+          comment: "Packages for development only."
+        - pattern: "build-dependencies"
+          reason: "BUILD_DEPENDENCY_OF"
+          comment: "Packages for building only."
+      ```
+    </CodeGroup>
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Resolutions
+
+Resolutions mark specific issues, policy rule violations, or vulnerabilities as acceptable. They are applied by matching a regular expression against the issue or violation message.
+
+<Warning>
+Resolutions should be a last resort. For license policy rule violations, prefer adding a [license finding curation](#curations) instead — resolutions do not affect generated open source notices.
+</Warning>
+
+If a resolution applies to all projects (not just this one), add it to the global [`resolutions.yml`](/configuration/resolutions) instead.
+
+<AccordionGroup>
+  <Accordion title="Resolving issues">
+    Issue resolutions acknowledge scanner or analyzer errors that cannot be fixed. The `reason` must be from [`IssueResolutionReason`](https://github.com/oss-review-toolkit/ort/blob/main/model/src/main/kotlin/config/IssueResolutionReason.kt).
+
+    ```yaml
+    resolutions:
+      issues:
+      - message: "ERROR: Timeout after 300 seconds while scanning file 'reporter-web-app/public/index.html'."
+        reason: "SCANNER_ISSUE"
+        comment: >-
+          The error can be ignored because the file does not contain relevant license information.
+      - message: "Does not have X.*"
+        reason: "BUILD_TOOL_ISSUE"
+        comment: "Error caused by a known issue for which a fix is being implemented, see https://github.com/..."
+    ```
+  </Accordion>
+
+  <Accordion title="Resolving policy rule violations">
+    Rule violation resolutions acknowledge violations that have an accepted exception. The `reason` must be from [`RuleViolationResolutionReason`](https://github.com/oss-review-toolkit/ort/blob/main/model/src/main/kotlin/config/RuleViolationResolutionReason.kt).
+
+    ```yaml
+    resolutions:
+      rule_violations:
+      - message: ".*LicenseRef-scancode-qt-commercial-1.1 found in 'third-party/qt/LICENSE'.*"
+        reason: "LICENSE_ACQUIRED_EXCEPTION"
+        comment: "Commercial Qt license for the project was purchased, see https://jira.example.com/issues/SOURCING-5678"
+    ```
+  </Accordion>
+
+  <Accordion title="Resolving vulnerabilities">
+    Vulnerability resolutions acknowledge CVEs that are not exploitable in this project's context. The `reason` must be from [`VulnerabilityResolutionReason`](https://github.com/oss-review-toolkit/ort/blob/main/model/src/main/kotlin/config/VulnerabilityResolutionReason.kt).
+
+    ```yaml
+    resolutions:
+      vulnerabilities:
+      - id: "CVE-2022-22965"
+        reason: "INEFFECTIVE_VULNERABILITY"
+        comment: >-
+          This vulnerability only applies to Spring MVC or Spring WebFlux applications;
+          it is ineffective for the current usage scenario.
+      - id: "CVE-9999-9999"
+        reason: "INEFFECTIVE_VULNERABILITY"
+        comment: "CVE-9999-9999 is a false positive."
+    ```
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Curations
+
+<Note>
+This feature requires `enableRepositoryPackageCurations: true` in the ORT `config.yml`.
+</Note>
+
+Curations in `.ort.yml` correct metadata or license findings that are specific to this project's repository. For curations that should apply globally to a dependency across all projects, use the global [`curations.yml`](/configuration/package-curations).
+
+<AccordionGroup>
+  <Accordion title="Curating package metadata">
+    Override incorrect or missing metadata for a specific package version:
+
+    ```yaml
+    curations:
+      packages:
+      - id: "Maven:com.example:dummy:0.0.1"
+        curations:
+          comment: "An explanation why the curation is needed."
+          homepage_url: "https://example.com"
+          vcs:
+            type: "Git"
+            url: "https://example.com/package.git"
+            revision: "main"
+          authors:
+          - "Name of the author"
+          concluded_license: "BSD-2-Clause"
+          declared_license_mapping:
+            "The BSD License": "BSD-2-Clause"
+    ```
+  </Accordion>
+
+  <Accordion title="Curating license findings in project source">
+    Correct scanner false positives within the project's own source code. Set `concluded_license` to `NONE` to eliminate a finding entirely.
+
+    ```yaml
+    curations:
+      license_findings:
+      - path: "src/**/*.cpp"
+        start_lines: "3,8"
+        line_count: 1
+        detected_license: "GPL-2.0-only"
+        reason: "CODE"
+        comment: "The scanner matches a variable named `gpl`."
+        concluded_license: "Apache-2.0"
+      - path: "README.md"
+        line_count: 1
+        detected_license: "GPL-1.0-or-later"
+        concluded_license: "NONE"
+        reason: "DOCUMENTATION_OF"
+        comment: "Findings reference a file with 'gpl' in its name."
+    ```
+
+    Available `reason` values are defined in [`LicenseFindingCurationReason.kt`](https://github.com/oss-review-toolkit/ort/blob/main/model/src/main/kotlin/config/LicenseFindingCurationReason.kt).
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Package Configurations
+
+<Note>
+This feature requires `enableRepositoryPackageConfigurations: true` in the ORT `config.yml`.
+</Note>
+
+Package configurations in `.ort.yml` define path excludes or license finding corrections for a specific dependency. This is the inline equivalent of a file in the global `package-configurations/` directory.
+
+```yaml
+package_configurations:
+- id: 'Maven:com.example:package:1.2.3'
+  source_artifact_url: "https://repo.maven.apache.org/maven2/com/example/package/1.2.3/package-1.2.3-sources.jar"
+  license_finding_curations:
+  - path: "path/to/problematic/file.java"
+    start_lines: 22
+    line_count: 1
+    detected_license: "GPL-2.0-only"
+    reason: "CODE"
+    comment: "The scanner matches a variable named `gpl`."
+    concluded_license: "Apache-2.0"
+```
+
+See [Package Configurations](/configuration/package-configurations) for full documentation of the syntax and matching options.
+
+---
+
+## License Choices
+
+License choices select a specific license from a multi-licensed package. A choice is only valid for licenses combined with the SPDX `OR` operator and is applied by the evaluator and reporter to the effective license of a package.
+
+<AccordionGroup>
+  <Accordion title="License choice by package">
+    Apply a choice to a specific package identified by its package ID. You can supply an optional `given` expression to target only a sub-expression of the full effective license.
+
+    ```yaml
+    license_choices:
+      package_license_choices:
+      - package_id: "Maven:com.example:first:0.0.1"
+        license_choices:
+        # Effective license before: (A OR B) AND ((C OR D) AND E)
+        - given: A OR B
+          choice: A
+        # Effective license after first choice: A AND ((C OR D) AND E)
+        - given: (C OR D) AND E
+          choice: C AND E
+        # Final effective license: A AND C AND E
+      - package_id: "Maven:com.example:second:2.3.4"
+        license_choices:
+        # Without 'given', choice is applied to the whole effective expression.
+        # Effective license before: (C OR D) AND E
+        - choice: C AND E
+        # Final effective license: C AND E
+    ```
+  </Accordion>
+
+  <Accordion title="Repository-wide license choice">
+    Apply a choice globally to every project or package in the repository that exposes the matching `given` expression. Package-level choices override repository choices.
+
+    ```yaml
+    license_choices:
+      repository_license_choices:
+      - given: "A OR B"
+        choice: "B"
+    ```
+
+    <Warning>
+    The `given` field is required for repository license choices. This prevents accidentally applying a choice to every license containing that expression across the entire project.
+    </Warning>
+  </Accordion>
+
+  <Accordion title="Invalid license choice example">
+    The `choice` must result in a valid sub-expression of the `given` expression. All mandatory components must be preserved.
+
+    ```yaml
+    # INVALID: 'E' is required but not present in the choice result.
+    - given: (C OR D) AND E
+      choice: C
+    ```
+
+    ORT throws an exception at deserialization time for invalid choices.
+  </Accordion>
+</AccordionGroup>

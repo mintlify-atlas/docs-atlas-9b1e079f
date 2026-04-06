@@ -1,0 +1,170 @@
+---
+title: "Package Configurations"
+description: "Define per-package path excludes and license finding curations for specific dependency versions to correct scanner results and mark non-distributed files."
+---
+
+A package configuration file targets a specific third-party dependency (by package ID and optionally provenance) to define:
+
+- **Path excludes** — mark files that are in the source artifact or repository but not part of the released binary (docs, tests, build scripts).
+- **License finding curations** — correct scanner false positives or wrong license detections in that dependency's source.
+
+<CardGroup cols={2}>
+  <Card title=".ort.yml curations" icon="file-code" href="/configuration/ort-yml#curations">
+    Correct license findings in your own project's source code.
+  </Card>
+  <Card title="Package curations" icon="pen-to-square" href="/configuration/package-curations">
+    Fix incorrect metadata (VCS URL, concluded license) for dependencies.
+  </Card>
+</CardGroup>
+
+---
+
+## Package configurations vs. curations
+
+| | Package configurations | Package curations |
+|---|---|---|
+| **Purpose** | Path excludes and scanner finding corrections | Metadata corrections and concluded license |
+| **Target** | A specific provenance (VCS URL or artifact URL) | Any version or version range of a package |
+| **Applied by** | Evaluator and reporter | Analyzer |
+| **Scope** | Per-provenance scan results | Package metadata across all scans |
+
+---
+
+## File location
+
+ORT reads package configurations from a directory (`$ORT_CONFIG_DIR/package-configurations/` by default) that it searches recursively for `.yml` files. Each file must contain **exactly one** package configuration, and no two files may define a configuration for the same package/provenance combination.
+
+---
+
+## ID and provenance matching
+
+A configuration applies to packages that match its `id` and optional provenance matcher. The `id` field supports [Ivy-style version matchers](https://ant.apache.org/ivy/history/2.5.0/settings/version-matchers.html).
+
+At most one of `vcs`, `source_artifact_url`, or `source_code_origin` may be specified alongside `id`.
+
+```yaml
+# Match a specific source artifact by its URL
+id: "NPM::ansi-styles:4.2.1"
+source_artifact_url: "https://registry.npmjs.org/ansi-styles/-/ansi-styles-4.2.1.tgz"
+
+# Match a specific VCS revision
+id: "NPM::ansi-styles:4.2.1"
+vcs:
+  type: "Git"
+  url: "https://github.com/chalk/ansi-styles.git"
+  revision: "74d421cf32342ac6ec7b507bd903a9e1105f74d7"
+
+# Match all versions ≤ 4.2.1 scanned from a VCS source
+id: "NPM::ansi-styles:(,4.2.1]"
+source_code_origin: VCS
+
+# Match versions [4.0, 4.2.1] scanned from a source artifact
+id: "NPM::ansi-styles:[4.0,4.2.1]"
+source_code_origin: ARTIFACT
+
+# Match exactly version 4.2.1, regardless of provenance
+id: "NPM::ansi-styles:4.2.1"
+```
+
+---
+
+## Defining path excludes
+
+Path excludes mark portions of a dependency's source as not being part of the distributed release artifact. This affects how license findings in those paths are treated in reports and evaluator rules.
+
+```yaml
+id: "Pip::example-package:0.0.1"
+source_artifact_url: "https://some-host/some-file-path.tgz"
+path_excludes:
+- pattern: "docs/**"
+  reason: "DOCUMENTATION_OF"
+  comment: "This directory contains documentation which is not distributed."
+- pattern: "tests/**"
+  reason: "TEST_OF"
+  comment: "Test code is not distributed."
+- pattern: "*.sh"
+  reason: "BUILD_TOOL_OF"
+  comment: "Build scripts are not distributed."
+```
+
+The `pattern` field uses [AntPathMatcher](https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/util/AntPathMatcher.html) glob syntax. Available `reason` values are defined in [`PathExcludeReason.kt`](https://github.com/oss-review-toolkit/ort/blob/main/model/src/main/kotlin/config/PathExcludeReason.kt).
+
+---
+
+## Defining license finding curations
+
+License finding curations correct individual scanner results. They are applied to `LicenseFinding` entries matching the specified path, line range, and detected license. Setting `concluded_license` to `NONE` eliminates the finding entirely.
+
+```yaml
+id: "Pip::example-package:0.0.1"
+source_artifact_url: "https://some-host/some-file-path.tgz"
+license_finding_curations:
+- path: "src/**/*.cpp"
+  start_lines: "3"
+  line_count: 11
+  detected_license: "GPL-2.0-only"
+  reason: "CODE"
+  comment: "The scanner matches a variable named `gpl`."
+  concluded_license: "Apache-2.0"
+```
+
+Fields:
+- `path` — glob pattern matching file paths within the package source
+- `start_lines` — comma-separated line numbers where the finding starts (optional)
+- `line_count` — number of lines the finding covers (optional)
+- `detected_license` — SPDX expression the scanner detected (optional; omit to match any detected license at that path)
+- `reason` — from [`LicenseFindingCurationReason.kt`](https://github.com/oss-review-toolkit/ort/blob/main/model/src/main/kotlin/config/LicenseFindingCurationReason.kt)
+- `comment` — explanation
+- `concluded_license` — replacement SPDX expression, or `NONE` to remove the finding
+
+---
+
+## Complete example
+
+```yaml
+id: "Pip::example-package:0.0.1"
+source_artifact_url: "https://some-host/some-file-path.tgz"
+path_excludes:
+- pattern: "docs/**"
+  reason: "DOCUMENTATION_OF"
+  comment: "This directory contains documentation which is not distributed."
+license_finding_curations:
+- path: "src/**/*.cpp"
+  start_lines: "3"
+  line_count: 11
+  detected_license: "GPL-2.0-only"
+  reason: "CODE"
+  comment: "The scanner matches a variable named `gpl`."
+  concluded_license: "Apache-2.0"
+```
+
+---
+
+## Command line usage
+
+Pass the package configurations directory to the evaluator or reporter:
+
+<CodeGroup>
+  ```bash evaluator
+  cli/build/install/ort/bin/ort evaluate \
+    -i [scanner-output-dir]/scan-result.yml \
+    -o [evaluator-output-dir] \
+    --license-classifications-file $ORT_CONFIG_DIR/license-classifications.yml \
+    --package-curations-file $ORT_CONFIG_DIR/curations.yml \
+    --package-configurations-dir $ORT_CONFIG_DIR/package-configurations \
+    --rules-file $ORT_CONFIG_DIR/evaluator.rules.kts
+  ```
+
+  ```bash reporter
+  cli/build/install/ort/bin/ort report \
+    -i [evaluator-output-dir]/evaluation-result.yml \
+    -o [reporter-output-dir] \
+    --report-formats PlainTextTemplate,WebApp \
+    --license-classifications-file $ORT_CONFIG_DIR/license-classifications.yml \
+    --package-configurations-dir $ORT_CONFIG_DIR/package-configurations
+  ```
+</CodeGroup>
+
+<Note>
+You can also define package configurations inline in `.ort.yml` using the `package_configurations` key. See [`.ort.yml` — Package Configurations](/configuration/ort-yml#package-configurations) for details. This requires `enableRepositoryPackageConfigurations: true` in `config.yml`.
+</Note>

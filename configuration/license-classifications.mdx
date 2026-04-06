@@ -1,0 +1,233 @@
+---
+title: "License Classifications"
+description: "Categorize SPDX licenses into named groups such as permissive, copyleft, or public-domain for use in evaluator rules and reporter templates."
+---
+
+The `license-classifications.yml` file assigns user-defined category labels to SPDX license identifiers. Evaluator rules and reporter templates consume these categories to make policy decisions without embedding license identifiers directly in their logic.
+
+<Tip>
+ORT enforces no built-in semantics on category names. You choose the names; your rules and templates define what they mean.
+</Tip>
+
+---
+
+## File structure
+
+The file has two top-level sections: `categories` and `categorizations`.
+
+```yaml
+categories:
+- name: "permissive"
+  description: "Licenses with permissive obligations."
+- name: "copyleft"
+- name: "copyleft-limited"
+- name: "public-domain"
+- name: "include-in-notice-file"
+  description: >-
+    Licenses assigned to this category are included in generated NOTICE files.
+- name: "include-source-code-offer-in-notice-file"
+  description: >-
+    Licenses that require the source code to be made available.
+
+categorizations:
+- id: "Apache-2.0"
+  categories:
+  - "permissive"
+  - "include-in-notice-file"
+
+- id: "MIT"
+  categories:
+  - "permissive"
+  - "include-in-notice-file"
+
+- id: "GPL-3.0-only"
+  categories:
+  - "copyleft"
+  - "include-in-notice-file"
+  - "include-source-code-offer-in-notice-file"
+
+- id: "LGPL-2.1-only"
+  categories:
+  - "copyleft-limited"
+  - "include-in-notice-file"
+
+- id: "CC0-1.0"
+  categories:
+  - "public-domain"
+  - "include-in-notice-file"
+```
+
+### categories
+
+Each entry requires a `name` (unique) and an optional `description`. The names you define here are the only valid values you can reference in `categorizations`.
+
+### categorizations
+
+Each entry has:
+- `id` — an SPDX license identifier (e.g., `Apache-2.0`, `GPL-2.0-only WITH Classpath-exception-2.0`)
+- `categories` — a list of category names to assign to this license
+
+A license can belong to multiple categories.
+
+---
+
+## How categories are used
+
+<AccordionGroup>
+  <Accordion title="In evaluator rules">
+    Rules read categories using `licenseClassifications.licensesByCategory["category-name"]`:
+
+    ```kotlin
+    val permissiveLicenses = licenseClassifications.licensesByCategory["permissive"].orEmpty()
+    val copyleftLicenses = licenseClassifications.licensesByCategory["copyleft"].orEmpty()
+    val copyleftLimitedLicenses = licenseClassifications.licensesByCategory["copyleft-limited"].orEmpty()
+    val publicDomainLicenses = licenseClassifications.licensesByCategory["public-domain"].orEmpty()
+
+    // Build a set of all licenses that your rules handle
+    val handledLicenses = listOf(
+        permissiveLicenses,
+        publicDomainLicenses,
+        copyleftLicenses,
+        copyleftLimitedLicenses
+    ).flatten().toSet()
+
+    // Create a matcher that checks if a license is copyleft
+    fun PackageRule.LicenseRule.isCopyleft() =
+        object : RuleMatcher {
+            override val description = "isCopyleft($license)"
+            override fun matches() = license in copyleftLicenses
+        }
+    ```
+
+    See [Evaluator Rules](/configuration/evaluator-rules) for the full rules DSL.
+  </Accordion>
+
+  <Accordion title="In plain text notice templates">
+    The `include-in-notice-file` and `include-source-code-offer-in-notice-file` categories control what appears in generated NOTICE files:
+
+    - `include-in-notice-file`: the license text for this package is included in the NOTICE file.
+    - `include-source-code-offer-in-notice-file`: a written offer to provide source code is included in the NOTICE file.
+
+    These categories are checked by ORT's built-in [PlainTextTemplate reporter](https://github.com/oss-review-toolkit/ort/tree/main/plugins/reporters/freemarker/src/main/resources/templates/plain-text). Custom Freemarker templates can reference any category you define.
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Common category patterns
+
+The following categories appear in ORT's own example classification file:
+
+| Category | Typical licenses |
+|---|---|
+| `permissive` | Apache-2.0, MIT, BSD-2-Clause, BSD-3-Clause, ISC, CC-BY-4.0 |
+| `copyleft` | GPL-2.0-only, GPL-3.0-only, AGPL-3.0-only, GPL-2.0-or-later |
+| `copyleft-limited` | LGPL-2.1-only, LGPL-3.0-only, EPL-2.0, MPL-2.0, CDDL-1.0 |
+| `public-domain` | CC0-1.0, Unlicense, SAX-PD |
+| `include-in-notice-file` | Most licenses requiring attribution |
+| `include-source-code-offer-in-notice-file` | GPL and AGPL family |
+
+<Note>
+`strong-copyleft` is a separate category used to distinguish licenses like PSF that have even stricter conditions than standard copyleft licenses.
+</Note>
+
+---
+
+## Extended example
+
+```yaml
+categories:
+- name: "copyleft"
+- name: "strong-copyleft"
+- name: "copyleft-limited"
+- name: "permissive"
+  description: "Licenses with permissive obligations."
+- name: "public-domain"
+- name: "include-in-notice-file"
+  description: >-
+    Licenses associated with this category are included in NOTICE files.
+- name: "include-source-code-offer-in-notice-file"
+  description: >-
+    Licenses that require that the source code of the packages needs to be provided.
+
+categorizations:
+- id: "AGPL-3.0-only"
+  categories:
+  - "copyleft"
+  - "include-in-notice-file"
+  - "include-source-code-offer-in-notice-file"
+
+- id: "Apache-2.0"
+  categories:
+  - "permissive"
+  - "include-in-notice-file"
+
+- id: "BSD-3-Clause"
+  categories:
+  - "permissive"
+  - "include-in-notice-file"
+
+- id: "CC0-1.0"
+  categories:
+  - "public-domain"
+  - "include-in-notice-file"
+
+- id: "EPL-2.0"
+  categories:
+  - "copyleft-limited"
+  - "include-in-notice-file"
+
+- id: "GPL-2.0-only"
+  categories:
+  - "copyleft"
+  - "include-in-notice-file"
+  - "include-source-code-offer-in-notice-file"
+
+- id: "GPL-2.0-only WITH Classpath-exception-2.0"
+  categories:
+  - "copyleft-limited"
+  - "include-in-notice-file"
+  - "include-source-code-offer-in-notice-file"
+
+- id: "GPL-3.0-only"
+  categories:
+  - "copyleft"
+  - "include-in-notice-file"
+  - "include-source-code-offer-in-notice-file"
+
+- id: "LGPL-2.1-only"
+  categories:
+  - "copyleft-limited"
+  - "include-in-notice-file"
+  - "include-source-code-offer-in-notice-file"
+
+- id: "MIT"
+  categories:
+  - "permissive"
+  - "include-in-notice-file"
+
+- id: "MPL-2.0"
+  categories:
+  - "copyleft-limited"
+  - "include-in-notice-file"
+
+- id: "Unlicense"
+  categories:
+  - "public-domain"
+  - "include-in-notice-file"
+```
+
+---
+
+## Command line usage
+
+Place the file at `$ORT_CONFIG_DIR/license-classifications.yml` or pass it explicitly:
+
+```bash
+cli/build/install/ort/bin/ort evaluate \
+  -i [scanner-output-dir]/scan-result.yml \
+  -o [evaluator-output-dir] \
+  --license-classifications-file $ORT_CONFIG_DIR/license-classifications.yml \
+  --package-curations-file $ORT_CONFIG_DIR/curations.yml \
+  --rules-file $ORT_CONFIG_DIR/evaluator.rules.kts
+```

@@ -1,0 +1,206 @@
+---
+title: "License handling"
+description: "How ORT detects, classifies, and curates license findings across the dependency analysis and scanning pipeline."
+---
+
+ORT builds a complete picture of the licenses in your software by combining information from multiple sources. Understanding how the different license types relate to each other helps you review and correct findings accurately.
+
+## License types
+
+ORT tracks four distinct license concepts per package. They are progressively refined throughout the pipeline.
+
+### Declared license
+
+The declared license is what the package author claims in the package manager metadata — for example, the `<licenses>` field in a `pom.xml` or the `license` field in a `package.json`.
+
+This is the license "visible from the outside." It does not include licenses found in source code files. ORT calls packages where the declared license does not match the source code content "envelope cases."
+
+Declared licenses frequently contain typos or non-SPDX identifiers. ORT ships built-in [mappings](https://github.com/oss-review-toolkit/ort/blob/main/utils/spdx/src/main/resources/declared-license-mapping.yml) for common variants. For ambiguous cases, you can define a `declared_license_mapping` in a [package curation](/configuration/package-curations).
+
+### Detected license
+
+The detected license is found by an ORT scanner by inspecting the actual source code — license files, copyright headers, and SPDX identifiers in individual files.
+
+Detected licenses complement the declared license and can reveal envelope cases. Because scanners analyze every file, there may be many findings that require review.
+
+### Main license
+
+The main license is a convenience value that combines the declared license(s) with detected licenses whose findings come from files matching the `licenseFilePatterns` defined in `config.yml` (typically license files like `LICENSE`, `COPYING`, etc.).
+
+### Concluded license
+
+The concluded license is the result of a manual [package curation](/configuration/package-curations). Use it when the union of declared and detected licenses is factually wrong — for example, due to metadata mistakes or scanner false positives.
+
+<Warning>
+  A concluded license completely overrides declared and detected licenses for a package. For packages that will be re-scanned across future versions, prefer a [license finding curation](#curating-individual-findings) over a concluded license to avoid silently missing new licenses introduced in later versions.
+</Warning>
+
+### Effective license
+
+The effective license is the license that actually applies to a package in your project context. It takes into account any [license choices](#license-choices) you have made for dual-licensed packages. Use the effective license in evaluator rules.
+
+## License review workflow
+
+<Steps>
+  <Step title="Run the analyzer">
+    The analyzer discovers all dependencies and collects their declared licenses.
+
+    ```bash
+    ort analyze -i /path/to/project -o /path/to/results/analyzer
+    ```
+  </Step>
+
+  <Step title="Run the scanner">
+    The scanner downloads dependency source code and detects licenses in every file.
+
+    ```bash
+    ort scan \
+      -i /path/to/results/analyzer/analyzer-result.yml \
+      -o /path/to/results/scanner
+    ```
+  </Step>
+
+  <Step title="Review findings">
+    Use the ORT WebApp reporter or [ORT Workbench](https://github.com/oss-review-toolkit/ort-workbench) to inspect findings. Pay attention to packages where declared and detected licenses differ.
+
+    ```bash
+    ort report \
+      -f WebApp \
+      -i /path/to/results/scanner/scan-result.yml \
+      -o /path/to/results/reporter
+    ```
+  </Step>
+
+  <Step title="Add curations for incorrect findings">
+    For scanner false positives or wrong metadata, add curations to your `curations.yml` or package configuration files. See [correcting findings](#correcting-findings) below.
+  </Step>
+
+  <Step title="Run the evaluator">
+    The evaluator applies your policy rules against the curated results and produces a list of violations.
+
+    ```bash
+    ort evaluate \
+      -i /path/to/results/scanner/scan-result.yml \
+      --rules-file /path/to/.ort/evaluator.rules.kts \
+      -o /path/to/results/evaluator
+    ```
+  </Step>
+</Steps>
+
+## Correcting findings
+
+### Concluding a package license
+
+Use a concluded license in `curations.yml` to set the authoritative license for a package when both declared and detected licenses are wrong:
+
+```yaml
+- id: "Maven:com.example:my-library:1.2.3"
+  curations:
+    comment: "Upstream metadata incorrectly lists GPL; source is Apache-2.0."
+    concluded_license: "Apache-2.0"
+```
+
+### Curating individual findings
+
+For targeted corrections — such as a single false-positive finding in one file — use a license finding curation in a package configuration file. This lets you fix only the specific finding without affecting others:
+
+```yaml
+# .ort/package-configurations/com.example/my-library-1.2.3.yml
+id: "Maven:com.example:my-library:1.2.3"
+licenseFindingCurations:
+  - path: "src/test/resources/example-mit.txt"
+    startLines: 3
+    lineCount: 4
+    detectedLicense: "MIT"
+    concludedLicense: "NOASSERTION"
+    reason: "TEST_OF"
+    comment: "This file is a test fixture containing a license text, not a dependency license."
+```
+
+<Tip>
+  Prefer license finding curations over concluded licenses for packages that will have future versions. Unmatched new findings will surface naturally and require explicit review.
+</Tip>
+
+### Mapping non-SPDX declared licenses
+
+For a specific package that uses an ambiguous license string, add a `declared_license_mapping` in a package curation:
+
+```yaml
+- id: "NPM::some-package:2.0.0"
+  curations:
+    declared_license_mapping:
+      "Artistic": "Artistic-1.0"
+```
+
+## License choices
+
+Some packages are dual-licensed and allow the consumer to choose which license to use. Record your choice in the project's `.ort.yml`:
+
+```yaml
+licenseChoices:
+  packageLicenseChoices:
+    - packageId: "Maven:org.example:dual-licensed:1.0.0"
+      licenseChoices:
+        - given: "MIT OR Apache-2.0"
+          choice: "Apache-2.0"
+```
+
+The chosen license becomes the **effective license** for that package in evaluator rules. Making a license choice does not affect the concluded license; it is applied on top of it.
+
+## Excluding paths and scopes
+
+Not all code in a repository needs to be reviewed. You can exclude test sources, build scripts, or optional scopes from compliance analysis using the project's `.ort.yml`:
+
+```yaml
+excludes:
+  paths:
+    - pattern: "tests/**"
+      reason: "TEST_OF"
+      comment: "Test files are not distributed with the product."
+  scopes:
+    - pattern: "test.*"
+      reason: "TEST_DEPENDENCY_OF"
+      comment: "Test-only dependencies are not included in release artifacts."
+```
+
+Excluded findings are filtered out of reports and do not trigger evaluator rule violations.
+
+## Copyright finding corrections
+
+Scanners sometimes produce incorrect copyright statements. Correct them in a package configuration:
+
+```yaml
+id: "Maven:com.example:my-library:1.2.3"
+copyrightGarbage:
+  - "See the copyright.txt file for copyright information."
+```
+
+To correct or merge similar copyright statements, use copyright curations in a package configuration:
+
+```yaml
+id: "Maven:com.example:my-library:1.2.3"
+copyrightFindingCurations:
+  - path: "README.md"
+    startLines: 1
+    lineCount: 1
+    detectedCopyright: "Copyright (c) Example, Inc."
+    concludedCopyright: "Copyright (C) 2020 Example, Inc."
+    reason: "INCORRECT"
+```
+
+## Related configuration
+
+<CardGroup cols={2}>
+  <Card title="Package curations" icon="file" href="/configuration/package-curations">
+    Correct metadata, set concluded licenses, and map declared license strings.
+  </Card>
+  <Card title="Package configurations" icon="file" href="/configuration/package-configurations">
+    Define path excludes and license finding curations for individual packages.
+  </Card>
+  <Card title=".ort.yml" icon="file" href="/configuration/ort-yml">
+    Configure excludes, license choices, and resolutions for your project.
+  </Card>
+  <Card title="License classifications" icon="file" href="/configuration/license-classifications">
+    Categorize licenses as permissive, copyleft, and so on for evaluator rules.
+  </Card>
+</CardGroup>

@@ -1,0 +1,254 @@
+---
+title: "SBOM generation"
+description: "Generate CycloneDX and SPDX software bills of materials, and FOSS attribution notices, using ORT's reporter."
+---
+
+A Software Bill of Materials (SBOM) is a structured inventory of the components, libraries, and licenses in a software product. SBOMs are required by regulations such as the U.S. Executive Order on Improving the Nation's Cybersecurity, and are increasingly expected by enterprise customers and supply chain auditors.
+
+ORT generates SBOMs in the two dominant industry formats — **CycloneDX** and **SPDX** — as well as plain-text FOSS attribution notices, all from a single scan result file.
+
+## End-to-end workflow
+
+The complete pipeline to produce an SBOM:
+
+<Steps>
+  <Step title="Analyze dependencies">
+    ```bash
+    ort analyze \
+      -i /path/to/project \
+      -o /path/to/results/analyzer
+    ```
+  </Step>
+
+  <Step title="Scan for license findings (optional but recommended)">
+    Scanning adds detected license information to the SBOM, making it more accurate than relying on declared metadata alone.
+
+    ```bash
+    ort scan \
+      -i /path/to/results/analyzer/analyzer-result.yml \
+      -o /path/to/results/scanner
+    ```
+  </Step>
+
+  <Step title="Generate the SBOM">
+    Pass the result file from the previous step to the reporter. Use `-f` to select one or more output formats.
+
+    ```bash
+    ort report \
+      -f CycloneDX,SpdxDocument \
+      -i /path/to/results/scanner/scan-result.yml \
+      -o /path/to/results/sbom
+    ```
+  </Step>
+</Steps>
+
+If you skip scanning, you can pass the analyzer result directly to the reporter:
+
+```bash
+ort report \
+  -f CycloneDX \
+  -i /path/to/results/analyzer/analyzer-result.yml \
+  -o /path/to/results/sbom
+```
+
+## CycloneDX
+
+The CycloneDX reporter produces a machine-readable SBOM that records all dependencies, their licenses (declared, detected, and concluded), and their dependency types (direct vs. transitive).
+
+<Tabs>
+  <Tab title="Command">
+    ```bash
+    ort report \
+      -f CycloneDX \
+      -i /path/to/results/scanner/scan-result.yml \
+      -o /path/to/results/sbom
+    ```
+
+    Output file: `bom.cyclonedx.xml`
+  </Tab>
+  <Tab title="JSON output">
+    To produce JSON instead of XML, pass a reporter option:
+
+    ```bash
+    ort report \
+      -f CycloneDX \
+      -O CycloneDX=output.file.formats=JSON \
+      -i /path/to/results/scanner/scan-result.yml \
+      -o /path/to/results/sbom
+    ```
+
+    Output file: `bom.cyclonedx.json`
+  </Tab>
+  <Tab title="Both XML and JSON">
+    ```bash
+    ort report \
+      -f CycloneDX \
+      -O CycloneDX=output.file.formats=XML,JSON \
+      -i /path/to/results/scanner/scan-result.yml \
+      -o /path/to/results/sbom
+    ```
+  </Tab>
+</Tabs>
+
+### ORT-specific CycloneDX properties
+
+The CycloneDX reporter adds the following ORT-specific properties to the SBOM, following the [CycloneDX property taxonomy](https://cyclonedx.github.io/cyclonedx-property-taxonomy/):
+
+| Property name | Parent entity | Description |
+|---------------|---------------|-------------|
+| `ort:dependencyType` | `component` | Whether the dependency is `direct` or `transitive`. |
+| `ort:origin` | `license` | The source of the license: `declared license`, `detected license`, or `concluded license`. |
+
+## SPDX
+
+The SPDX reporter generates a structured document that lists all packages, their relationships, licenses, and copyright notices. It is particularly useful for open source disclosure and toolchain interoperability.
+
+<Tabs>
+  <Tab title="YAML (default)">
+    ```bash
+    ort report \
+      -f SpdxDocument \
+      -i /path/to/results/scanner/scan-result.yml \
+      -o /path/to/results/sbom
+    ```
+
+    Output file: `bom.spdx.yaml`
+  </Tab>
+  <Tab title="JSON">
+    ```bash
+    ort report \
+      -f SpdxDocument \
+      -O SpdxDocument=output.file.formats=JSON \
+      -i /path/to/results/scanner/scan-result.yml \
+      -o /path/to/results/sbom
+    ```
+
+    Output file: `bom.spdx.json`
+  </Tab>
+  <Tab title="Multiple formats">
+    ```bash
+    ort report \
+      -f SpdxDocument \
+      -O SpdxDocument=output.file.formats=YAML,JSON \
+      -i /path/to/results/scanner/scan-result.yml \
+      -o /path/to/results/sbom
+    ```
+  </Tab>
+</Tabs>
+
+### SPDX version
+
+The reporter defaults to SPDX 2.2. To generate an SPDX 2.3 document:
+
+```bash
+ort report \
+  -f SpdxDocument \
+  -O SpdxDocument=spdxVersion=SPDX-2.3 \
+  -i /path/to/results/scanner/scan-result.yml \
+  -o /path/to/results/sbom
+```
+
+### Document metadata
+
+Add creator and comment information to the SPDX document:
+
+```bash
+ort report \
+  -f SpdxDocument \
+  -O "SpdxDocument=creationInfo.organization=Acme Corp" \
+  -O "SpdxDocument=creationInfo.person=Jane Smith" \
+  -O "SpdxDocument=document.name=my-product-1.0" \
+  -i /path/to/results/scanner/scan-result.yml \
+  -o /path/to/results/sbom
+```
+
+### File-level information
+
+By default, the SPDX document includes file-level license findings. To suppress this (for a more compact output):
+
+```bash
+ort report \
+  -f SpdxDocument \
+  -O SpdxDocument=file.information.enabled=false \
+  -i /path/to/results/scanner/scan-result.yml \
+  -o /path/to/results/sbom
+```
+
+## FOSS attribution notices
+
+In addition to machine-readable SBOMs, ORT can generate human-readable FOSS attribution documents — the kind of open source notice required when distributing products under licenses like Apache-2.0 or MIT.
+
+Use the `PlainTextTemplate` reporter with the built-in `NOTICE_DEFAULT` or `NOTICE_SUMMARY` template:
+
+<Tabs>
+  <Tab title="Default notice">
+    Generates a per-package notice with full license texts:
+
+    ```bash
+    ort report \
+      -f PlainTextTemplate \
+      -O PlainTextTemplate=template.id=NOTICE_DEFAULT \
+      -i /path/to/results/scanner/scan-result.yml \
+      -o /path/to/results/notices
+    ```
+  </Tab>
+  <Tab title="Summary notice">
+    Generates a compact summary listing each unique license once:
+
+    ```bash
+    ort report \
+      -f PlainTextTemplate \
+      -O PlainTextTemplate=template.id=NOTICE_SUMMARY \
+      -i /path/to/results/scanner/scan-result.yml \
+      -o /path/to/results/notices
+    ```
+  </Tab>
+  <Tab title="Both notices">
+    ```bash
+    ort report \
+      -f PlainTextTemplate \
+      -O PlainTextTemplate=template.id=NOTICE_DEFAULT,NOTICE_SUMMARY \
+      -i /path/to/results/scanner/scan-result.yml \
+      -o /path/to/results/notices
+    ```
+  </Tab>
+</Tabs>
+
+You can also provide a custom FreeMarker template file for organization-specific formats:
+
+```bash
+ort report \
+  -f PlainTextTemplate \
+  -O PlainTextTemplate=template.path=/path/to/custom-notice.ftl \
+  -i /path/to/results/scanner/scan-result.yml \
+  -o /path/to/results/notices
+```
+
+## Generating all formats at once
+
+Run the reporter once to produce all SBOM and report formats together:
+
+```bash
+ort report \
+  -f CycloneDX,SpdxDocument,PlainTextTemplate,StaticHTML,WebApp \
+  -O PlainTextTemplate=template.id=NOTICE_DEFAULT,NOTICE_SUMMARY \
+  -i /path/to/results/scanner/scan-result.yml \
+  -o /path/to/results/reporter
+```
+
+## Related tools
+
+<CardGroup cols={2}>
+  <Card title="ORT Workbench" icon="monitor" href="https://github.com/oss-review-toolkit/ort-workbench">
+    A desktop viewer for ORT result files. Use it to review findings before generating SBOMs.
+  </Card>
+  <Card title="ORTHW" icon="terminal" href="https://github.com/oss-review-toolkit/orthw">
+    A bash script that simplifies common tasks when processing ORT results, including batch curation workflows.
+  </Card>
+  <Card title="OpossumUI" icon="monitor" href="https://github.com/opossum-tool/OpossumUI">
+    A compliance audit desktop app. ORT can generate Opossum input files using the `Opossum` reporter.
+  </Card>
+  <Card title="ORT Server" icon="server" href="https://github.com/eclipse-apoapsis/ort-server">
+    A scalable Kubernetes-based ORT server with a REST API and web frontend for running ORT at scale.
+  </Card>
+</CardGroup>

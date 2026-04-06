@@ -1,0 +1,202 @@
+---
+title: "Analyzer"
+description: "Determine the full dependency tree of your software projects without modifying source code."
+---
+
+The analyzer is ORT's Software Composition Analysis (SCA) engine. It interrogates the package managers present in your project directory to build a complete dependency graph — without applying plugins or touching your build configuration.
+
+It is the **only mandatory ORT tool** to run. Every other tool (`scanner`, `advisor`, `evaluator`, `reporter`) consumes the `analyzer-result.yml` file it produces.
+
+<Note>
+The analyzer does not modify your source code or build files. It queries existing package manager metadata in place.
+</Note>
+
+## Prerequisites
+
+- A checked-out project directory with at least one supported package manager definition file.
+- All dependencies must be resolvable from the configured registries (i.e., the project must build cleanly).
+
+## CLI usage
+
+```bash
+ort analyze -i <project-dir> -o <output-dir> [options]
+```
+
+| Flag | Short | Description |
+|---|---|---|
+| `--input-dir` | `-i` | Project directory to analyze. Can point to a directory or a single definition file (required). |
+| `--output-dir` | `-o` | Directory where `analyzer-result.yml` is written (required). |
+| `--output-formats` | `-f` | Comma-separated list of output formats: `YAML` (default) or `JSON`. |
+| `--repository-configuration-file` | | Override the `.ort.yml` file found in the repository root. |
+| `--resolutions-file` | | File containing issue resolutions (defaults to `~/.ort/config/resolutions.yml`). |
+| `--label` | `-l` | Set a key=value label in the result. Repeatable. |
+| `--dry-run` | | Show which package managers would be used without running the analysis. |
+
+## Real example
+
+```bash
+ort analyze \
+  -i /src/my-project \
+  -o /results/analyzer \
+  -f YAML,JSON \
+  --label distribution=external \
+  --label project=my-service
+```
+
+## Supported package managers
+
+<AccordionGroup>
+  <Accordion title="C / C++">
+    - **Bazel** — [bazel.build](https://bazel.build/) (some limitations, see [open tasks](https://github.com/oss-review-toolkit/ort/issues/264))
+    - **Conan 1.x and 2.x** — [conan.io](https://conan.io/)
+  </Accordion>
+  <Accordion title="Dart / Flutter">
+    - **Pub** — [pub.dev](https://pub.dev/)
+  </Accordion>
+  <Accordion title="Elixir">
+    - **Mix** — [hexdocs.pm/mix](https://hexdocs.pm/mix/)
+  </Accordion>
+  <Accordion title="Erlang">
+    - **Rebar3** — [rebar3.org](https://www.rebar3.org/)
+  </Accordion>
+  <Accordion title="Gleam">
+    - **Gleam** — [gleam.run](https://gleam.run/)
+  </Accordion>
+  <Accordion title="Go">
+    - **GoMod** — [Go Modules](https://github.com/golang/go/wiki/Modules)
+  </Accordion>
+  <Accordion title="Haskell">
+    - **Stack** — [haskellstack.org](https://haskellstack.org/)
+  </Accordion>
+  <Accordion title="Java">
+    - **Gradle** — [gradle.org](https://gradle.org/)
+    - **Maven** — [maven.apache.org](https://maven.apache.org/) (default profile only)
+    - Including the **Tycho** extension for OSGi bundles and Eclipse IDE plug-ins.
+  </Accordion>
+  <Accordion title="JavaScript / Node.js">
+    - **Bower** — [bower.io](https://bower.io/)
+    - **NPM** — [npmjs.com](https://www.npmjs.com/)
+    - **PNPM** — [pnpm.io](https://pnpm.io/)
+    - **Yarn 1** — [classic.yarnpkg.com](https://classic.yarnpkg.com/)
+    - **Yarn 2+** — [v2.yarnpkg.com](https://v2.yarnpkg.com/)
+  </Accordion>
+  <Accordion title=".NET">
+    - **DotNet** — [dotnet CLI](https://docs.microsoft.com/en-us/dotnet/core/tools/) (no floating versions/ranges; no target framework)
+    - **NuGet** — [nuget.org](https://www.nuget.org/) (same limitations as DotNet)
+  </Accordion>
+  <Accordion title="Objective-C / Swift">
+    - **Carthage** — [github.com/Carthage/Carthage](https://github.com/Carthage/Carthage) (no `cartfile.private`)
+    - **CocoaPods** — [cocoapods.org](https://github.com/CocoaPods/CocoaPods) (no custom source repositories)
+    - **SwiftPM** — [swift.org/package-manager](https://www.swift.org/package-manager)
+  </Accordion>
+  <Accordion title="PHP">
+    - **Composer** — [getcomposer.org](https://getcomposer.org/)
+  </Accordion>
+  <Accordion title="Python">
+    - **PIP** — [pip.pypa.io](https://pip.pypa.io/)
+    - **Pipenv** — [pipenv.pypa.io](https://pipenv.pypa.io/en/latest/)
+    - **Poetry** — [python-poetry.org](https://python-poetry.org/)
+  </Accordion>
+  <Accordion title="Ruby">
+    - **Bundler** — [bundler.io](https://bundler.io/) (restricted to the version available on the host)
+  </Accordion>
+  <Accordion title="Rust">
+    - **Cargo** — [doc.rust-lang.org/cargo](https://doc.rust-lang.org/cargo/)
+  </Accordion>
+  <Accordion title="Scala">
+    - **SBT** — [scala-sbt.org](https://www.scala-sbt.org/)
+  </Accordion>
+  <Accordion title="Unmanaged">
+    A special pseudo-package manager that captures files not associated with any other package manager.
+  </Accordion>
+</AccordionGroup>
+
+## Fallback package managers
+
+When a project uses an unsupported package manager, or no package manager at all, two generic fallbacks are available:
+
+<CardGroup cols={2}>
+  <Card title="ORT Project package manager" icon="folder-tree">
+    Manually define projects and their dependencies using an ORT Project definition file.
+  </Card>
+  <Card title="SPDX documents" icon="file-text">
+    Use SPDX 2.x documents to describe projects or individual packages.
+  </Card>
+</CardGroup>
+
+## Output format
+
+The analyzer writes an `OrtResult` file named `analyzer-result.yml` (or `.json` if requested). The result embeds the full dependency graph for every detected project:
+
+```yaml
+analyzer:
+  startTime: "2024-01-15T10:00:00Z"
+  endTime: "2024-01-15T10:01:23Z"
+  result:
+    projects:
+      - id: "Maven:com.example:my-service:1.0.0"
+        definitionFilePath: "pom.xml"
+        scopeDependencies:
+          - name: "compile"
+            dependencies:
+              - id: "Maven:org.springframework:spring-core:6.1.0"
+                dependencies: []
+    packages:
+      - metadata:
+          id: "Maven:org.springframework:spring-core:6.1.0"
+          declaredLicenses:
+            - "Apache-2.0"
+          homepageUrl: "https://spring.io/projects/spring-framework"
+          sourceArtifact:
+            url: "https://repo1.maven.org/maven2/..."
+            hash:
+              value: "abc123..."
+              algorithm: "SHA-1"
+```
+
+## Configuration options
+
+### `allowDynamicVersions`
+
+By default, the analyzer rejects version ranges and dynamic version specifiers (e.g., `[1.0,)` in Maven, `^1.2.3` in NPM when they resolve differently from what is locked). Setting `allowDynamicVersions: true` in the ORT configuration relaxes this check:
+
+```yaml
+ort:
+  analyzer:
+    allowDynamicVersions: true
+```
+
+<Warning>
+Enabling `allowDynamicVersions` may produce non-reproducible results. Prefer pinning versions or using a lockfile.
+</Warning>
+
+### Enabling and disabling package managers
+
+You can restrict which package managers run via the ORT config file:
+
+```yaml
+ort:
+  analyzer:
+    enabledPackageManagers:
+      - Gradle
+      - Maven
+    disabledPackageManagers:
+      - NPM
+```
+
+## Scope exclusions via `.ort.yml`
+
+Place a `.ort.yml` file at the repository root to exclude specific scopes (e.g., test dependencies) from analysis:
+
+```yaml
+excludes:
+  scopes:
+    - pattern: "test"
+      reason: "TEST_DEPENDENCY_OF"
+      comment: "Exclude test-only dependencies from compliance checks."
+    - pattern: "devDependencies"
+      reason: "DEV_DEPENDENCY_OF"
+      comment: "Exclude development-only npm packages."
+```
+
+Excluded scopes are still present in the result file but are marked as excluded, so downstream tools can skip them.

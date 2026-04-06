@@ -1,0 +1,242 @@
+---
+title: "Package managers"
+description: "ORT supports 30+ package managers across all major languages, detecting dependencies without modifying your source code."
+---
+
+The analyzer queries your project's package managers to build a complete dependency tree. No build system plugins or modifications to your source code are required — ORT reads the existing lock files and manifest files that your project already has.
+
+The dependency tree is written to `analyzer-result.yml` in your chosen output directory and serves as the input for all downstream ORT tools.
+
+<Note>
+All projects must be buildable in a single step without custom environment configuration for analysis to succeed reliably.
+</Note>
+
+## Supported package managers
+
+ORT currently supports the following package managers, grouped by language ecosystem.
+
+<AccordionGroup>
+
+<Accordion title="C / C++">
+
+| Package manager | Notes |
+|---|---|
+| [Bazel](https://bazel.build/) | Some limitations apply; see [open tasks](https://github.com/oss-review-toolkit/ort/issues/264). |
+| [Conan 1.x and 2.x](https://conan.io/) | Both the legacy `conan` and the new `conan2` commands are supported. Set `useConan2: true` in config to use Conan 2. A lockfile name can be specified with `lockfileName`. |
+
+</Accordion>
+
+<Accordion title="Dart / Flutter">
+
+| Package manager | Notes |
+|---|---|
+| [Pub](https://pub.dev/) | Standard Flutter/Dart dependency resolution. |
+
+</Accordion>
+
+<Accordion title="Elixir">
+
+| Package manager | Notes |
+|---|---|
+| [Mix](https://hexdocs.pm/mix/) | Standard Elixir build tool. |
+
+</Accordion>
+
+<Accordion title="Erlang">
+
+| Package manager | Notes |
+|---|---|
+| [Rebar3](https://www.rebar3.org/) | Standard Erlang build tool. |
+
+</Accordion>
+
+<Accordion title="Gleam">
+
+| Package manager | Notes |
+|---|---|
+| [Gleam](https://gleam.run/) | Native Gleam package manager. |
+
+</Accordion>
+
+<Accordion title="Go">
+
+| Package manager | Notes |
+|---|---|
+| [GoMod](https://github.com/golang/go/wiki/Modules) | Go modules (go.mod / go.sum). |
+
+</Accordion>
+
+<Accordion title="Haskell">
+
+| Package manager | Notes |
+|---|---|
+| [Stack](https://haskellstack.org/) | Standard Haskell build tool. |
+
+</Accordion>
+
+<Accordion title="Java">
+
+| Package manager | Notes |
+|---|---|
+| [Gradle](https://gradle.org/) | Full multi-project support via the Gradle Inspector. |
+| [Maven](https://maven.apache.org/) | Limited to the [default profile only](https://github.com/oss-review-toolkit/ort/issues/1774). Includes the [Tycho](https://tycho.eclipseprojects.io/doc/main/index.html) extension for OSGi bundles and Eclipse plug-ins. |
+
+</Accordion>
+
+<Accordion title="JavaScript / Node.js">
+
+| Package manager | Notes |
+|---|---|
+| [Bower](https://bower.io/) | Legacy front-end package manager. |
+| [NPM](https://www.npmjs.com/) | All NPM v6+ lockfile formats. |
+| [PNPM](https://pnpm.io/) | Efficient disk-space usage with symlinked node_modules. |
+| [Yarn 1 (Classic)](https://classic.yarnpkg.com/) | `yarn.lock` v1 format. |
+| [Yarn 2+ (Berry)](https://v2.yarnpkg.com/) | Plug'n'Play and node_modules modes. Certificate verification can be disabled with `disableRegistryCertificateVerification: true`. |
+
+</Accordion>
+
+<Accordion title=".NET">
+
+| Package manager | Notes |
+|---|---|
+| [DotNet](https://docs.microsoft.com/en-us/dotnet/core/tools/) | No support for [floating versions / ranges](https://github.com/oss-review-toolkit/ort/pull/1303#issue-253860146) or [target framework resolution](https://github.com/oss-review-toolkit/ort/issues/4083). |
+| [NuGet](https://www.nuget.org/) | Same limitations as DotNet regarding floating versions and target framework resolution. |
+
+</Accordion>
+
+<Accordion title="Objective-C / Swift">
+
+| Package manager | Notes |
+|---|---|
+| [Carthage](https://github.com/Carthage/Carthage) | [`cartfile.private` is not supported](https://github.com/oss-review-toolkit/ort/issues/3774). |
+| [CocoaPods](https://github.com/CocoaPods/CocoaPods) | [Custom source repositories are not supported](https://github.com/oss-review-toolkit/ort/issues/4188). |
+| [SwiftPM](https://www.swift.org/package-manager) | Swift Package Manager (Package.swift). |
+
+</Accordion>
+
+<Accordion title="PHP">
+
+| Package manager | Notes |
+|---|---|
+| [Composer](https://getcomposer.org/) | Standard PHP dependency management via composer.json / composer.lock. |
+
+</Accordion>
+
+<Accordion title="Python">
+
+| Package manager | Notes |
+|---|---|
+| [PIP](https://pip.pypa.io/) | requirements.txt and setup.py based projects. |
+| [Pipenv](https://pipenv.pypa.io/en/latest/) | Pipfile / Pipfile.lock projects. |
+| [Poetry](https://python-poetry.org/) | pyproject.toml / poetry.lock projects. |
+
+</Accordion>
+
+<Accordion title="Ruby">
+
+| Package manager | Notes |
+|---|---|
+| [Bundler](https://bundler.io/) | [Restricted to the Bundler version installed on the host](https://github.com/oss-review-toolkit/ort/issues/1308). |
+
+</Accordion>
+
+<Accordion title="Rust">
+
+| Package manager | Notes |
+|---|---|
+| [Cargo](https://doc.rust-lang.org/cargo/) | Cargo.toml / Cargo.lock based projects. |
+
+</Accordion>
+
+<Accordion title="Scala">
+
+| Package manager | Notes |
+|---|---|
+| [SBT](https://www.scala-sbt.org/) | Standard Scala build tool. |
+
+</Accordion>
+
+</AccordionGroup>
+
+## Fallback package managers
+
+When a project uses a build system that ORT does not directly support, or no package manager at all, two generic fallbacks are available.
+
+<AccordionGroup>
+
+<Accordion title="ORT Project file">
+
+The ORT Project package manager lets you manually define projects and their dependencies in a hand-authored ORT Project definition file. This is useful for projects with unusual build systems or for describing a dependency graph that cannot be automatically detected.
+
+The ORT Project package manager reads a hand-authored definition file (typically named `ort-project.ort.yml`) where you manually specify packages and their metadata. This is useful for projects with unusual build systems or for describing a dependency graph that cannot be automatically detected.
+
+</Accordion>
+
+<Accordion title="SPDX document file">
+
+ORT can read [SPDX 2.x documents](https://spdx.dev/specifications/) as both project descriptors and package descriptors. This is useful when a package author already publishes an SPDX SBOM that describes their dependencies.
+
+</Accordion>
+
+</AccordionGroup>
+
+## Enabling and disabling package managers
+
+By default, ORT runs all supported package managers. You can restrict which ones are active in your ORT configuration file (`~/.ort/config/config.yml` or the path passed via `-c`).
+
+<CodeGroup>
+
+```yaml Enable specific package managers only
+ort:
+  analyzer:
+    enabledPackageManagers: [Gradle, Maven, NPM]
+```
+
+```yaml Disable specific package managers
+ort:
+  analyzer:
+    disabledPackageManagers: [Bower, Bundler]
+```
+
+</CodeGroup>
+
+<Note>
+`disabledPackageManagers` takes precedence over `enabledPackageManagers`. A package manager listed in both will be disabled.
+</Note>
+
+### Per-package-manager options
+
+Some package managers accept additional options in the `packageManagers` section. For example:
+
+```yaml
+ort:
+  analyzer:
+    packageManagers:
+      Gradle:
+        mustRunAfter: [NPM]
+
+      GradleInspector:
+        options:
+          javaHome: "/path/to/java/home"
+
+      Yarn2:
+        options:
+          disableRegistryCertificateVerification: false
+
+      Conan:
+        options:
+          lockfileName: "conan.lock"
+          useConan2: true
+```
+
+The `mustRunAfter` option is useful when one package manager generates files that another package manager needs as input.
+
+## Running the analyzer
+
+```bash
+ort analyze \
+  -i /path/to/your/project \
+  -o /path/to/output/dir
+```
+
+The result is written to `/path/to/output/dir/analyzer-result.yml`. Pass this file as `-i` to the scanner, advisor, evaluator, and reporter tools.

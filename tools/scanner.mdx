@@ -1,0 +1,224 @@
+---
+title: "Scanner"
+description: "Detect licenses and copyrights in dependency source code using configurable scanner plugins."
+---
+
+The scanner wraps multiple license and copyright detection tools behind a common API. Given an `analyzer-result.yml`, it automatically downloads each dependency's source code (via the downloader) and runs the configured scanner(s) against it.
+
+Scan results are stored in the output `scan-result.yml` and can be cached in storage backends to avoid redundant scanning.
+
+## Prerequisites
+
+- An `analyzer-result.yml` produced by the [analyzer](/tools/analyzer).
+- At least one scanner plugin available on the classpath or configured as an external tool.
+
+## CLI usage
+
+```bash
+ort scan -i <analyzer-result.yml> -o <output-dir> [options]
+```
+
+| Flag | Short | Description |
+|---|---|---|
+| `--ort-file` | `-i` | Path to an ORT result file containing an analyzer result (required). |
+| `--output-dir` | `-o` | Directory where `scan-result.yml` is written (required). |
+| `--output-formats` | `-f` | Comma-separated output formats: `YAML` (default) or `JSON`. |
+| `--scanners` | `-s` | Comma-separated list of scanner plugins to use. Defaults to `ScanCode` if available. |
+| `--project-scanners` | | Scanners to use specifically for project source code (defaults to `--scanners`). |
+| `--package-types` | | Limit scanning to `PACKAGE`, `PROJECT`, or both (default: both). |
+| `--label` | `-l` | Set a key=value label in the result. Repeatable. |
+| `--resolutions-file` | | File containing issue resolutions. |
+
+<Note>
+The `--skip-excluded` flag is deprecated. Use the global property `ort -P ort.scanner.skipExcluded=true scan` to skip excluded projects and packages.
+</Note>
+
+## Real example
+
+```bash
+ort scan \
+  -i /results/analyzer/analyzer-result.yml \
+  -o /results/scanner \
+  -s ScanCode \
+  --package-types PACKAGE \
+  -f YAML
+```
+
+## Scanner plugins
+
+<CardGroup cols={2}>
+  <Card title="ScanCode" icon="magnifying-glass">
+    Recommended. Open-source scanner from AboutCode. Detects licenses, copyrights, and package metadata across hundreds of formats.
+  </Card>
+  <Card title="FossID" icon="shield">
+    Commercial snippet scanner. Detects reused code fragments, even when licenses are not declared. Requires a FossID server.
+  </Card>
+  <Card title="Licensee" icon="file-check">
+    Reference implementation. Matches whole-file license texts against known SPDX licenses. Fast but limited to declared license files.
+  </Card>
+  <Card title="Askalono" icon="search">
+    Reference implementation. Uses a TF-IDF similarity algorithm to identify license texts.
+  </Card>
+  <Card title="SCANOSS" icon="radar">
+    Snippet scanner using the SCANOSS knowledge base. Identifies reused open source code fragments.
+  </Card>
+</CardGroup>
+
+<Tip>
+For most projects, **ScanCode** is the recommended scanner. It has the broadest language support and is thoroughly tested with ORT.
+</Tip>
+
+## Skipping excluded scopes
+
+To skip scanning dependencies that are excluded in `.ort.yml` (e.g., test or dev dependencies), set the global property:
+
+```bash
+ort -P ort.scanner.skipExcluded=true scan \
+  -i /results/analyzer/analyzer-result.yml \
+  -o /results/scanner
+```
+
+Alternatively, configure it in the ORT config file:
+
+```yaml
+ort:
+  scanner:
+    skipExcluded: true
+```
+
+## Output format
+
+The scanner writes a `scan-result.yml` file that augments the analyzer result with per-file scan findings:
+
+```yaml
+scanner:
+  startTime: "2024-01-15T10:05:00Z"
+  endTime: "2024-01-15T10:30:44Z"
+  scanResults:
+    "Maven:org.apache.commons:commons-lang3:3.12.0":
+      - provenance:
+          sourceArtifact:
+            url: "https://repo1.maven.org/maven2/..."
+        scanner:
+          name: "ScanCode"
+          version: "32.1.0"
+        summary:
+          startTime: "2024-01-15T10:06:00Z"
+          endTime: "2024-01-15T10:06:42Z"
+          licenseFindings:
+            - license: "Apache-2.0"
+              location:
+                path: "LICENSE.txt"
+                startLine: 1
+                endLine: 202
+          copyrightFindings:
+            - statement: "Copyright 2001-2023 The Apache Software Foundation"
+              location:
+                path: "LICENSE.txt"
+                startLine: 5
+                endLine: 5
+```
+
+## Scan storage backends
+
+Storage backends allow previously computed scan results to be reused, avoiding repeated downloads and scans. Results are keyed by source code provenance (VCS revision or artifact hash).
+
+ORT supports two granularities:
+- **`PROVENANCE_BASED`** — results are shared per VCS revision, benefiting repositories that provide many packages.
+- **`PACKAGE_BASED`** — results are stored and looked up per individual package.
+
+Multiple storages can be declared. For reads, ORT queries them in declaration order and uses the first match. All configured write storages receive new results.
+
+<Tabs>
+  <Tab title="Local file storage">
+    The default. Results are stored as compressed files in `~/.ort/scanner/scan-results/`.
+
+    ```yaml
+    ort:
+      scanner:
+        storages:
+          fileBasedStorage:
+            backend:
+              localFileStorage:
+                directory: "/tmp/ort/scan-results"
+                compression: false
+
+        storageReaders: ["fileBasedStorage"]
+        storageWriters: ["fileBasedStorage"]
+    ```
+  </Tab>
+  <Tab title="HTTP / Artifactory">
+    Any HTTP file server can serve as a scan cache. Custom headers allow token-based authentication.
+
+    ```yaml
+    ort:
+      scanner:
+        storages:
+          artifactoryStorage:
+            backend:
+              httpFileStorage:
+                url: "https://artifactory.example.com/artifactory/ort-scan-results"
+                headers:
+                  X-JFrog-Art-Api: "your-api-token"
+
+        storageReaders: ["artifactoryStorage"]
+        storageWriters: ["artifactoryStorage"]
+    ```
+  </Tab>
+  <Tab title="PostgreSQL">
+    Requires PostgreSQL ≥ 9.4 with a UTF8-encoded database. Results are stored in a `scan_results` table as JSONB.
+
+    ```yaml
+    ort:
+      scanner:
+        storages:
+          postgresStorage:
+            connection:
+              url: "jdbc:postgresql://db.example.com:5444/ort"
+              schema: "public"
+              username: "ort_user"
+              password: "s3cr3t"
+              sslmode: "verify-full"
+
+        storageReaders: ["postgresStorage"]
+        storageWriters: ["postgresStorage"]
+    ```
+  </Tab>
+  <Tab title="ClearlyDefined">
+    Read-only. Queries the [ClearlyDefined](https://clearlydefined.io) service for community-curated scan results. No new results are uploaded.
+
+    ```yaml
+    ort:
+      scanner:
+        storages:
+          clearlyDefined:
+            serverUrl: "https://api.clearlydefined.io"
+
+        storageReaders: ["clearlyDefined"]
+    ```
+  </Tab>
+</Tabs>
+
+### Chaining multiple storages
+
+You can chain storages so ORT checks a local cache before hitting a remote service:
+
+```yaml
+ort:
+  scanner:
+    storages:
+      localCache:
+        backend:
+          localFileStorage:
+            directory: "/tmp/ort/scan-results"
+      remoteCache:
+        connection:
+          url: "jdbc:postgresql://db.example.com:5444/ort"
+          username: "ort_user"
+          password: "s3cr3t"
+      clearlyDefined:
+        serverUrl: "https://api.clearlydefined.io"
+
+    storageReaders: ["localCache", "remoteCache", "clearlyDefined"]
+    storageWriters: ["localCache", "remoteCache"]
+```

@@ -1,0 +1,152 @@
+---
+title: "Reporter"
+description: "Generate compliance reports, SBOMs, and NOTICE files from ORT result data in a wide range of formats."
+---
+
+The reporter transforms an ORT result file into human-readable and machine-readable output documents. A single invocation can produce multiple formats simultaneously. All reporter names are case-insensitive.
+
+## Prerequisites
+
+- An ORT result file (typically the output of the [evaluator](/tools/evaluator), though any stage's output works).
+
+## CLI usage
+
+```bash
+ort report -i <ort-result.yml> -o <output-dir> -f <formats> [options]
+```
+
+| Flag | Short | Description |
+|---|---|---|
+| `--ort-file` | `-i` | ORT result file to use as input (required). |
+| `--output-dir` | `-o` | Directory where reports are written (required). |
+| `--report-formats` | `-f` | Comma-separated list of reporter IDs to run (required). |
+| `--report-option` | `-O` | Pass a reporter-specific option as `ReporterName=key=value`. Repeatable. |
+| `--license-classifications-file` | | License classifications YAML. |
+| `--copyright-garbage-file` | | Copyright statements to exclude from output. |
+| `--custom-license-texts-dir` | | Directory of `.txt` files (named by SPDX ID) providing custom license text. |
+| `--package-configurations-dir` | | Directory of per-package configuration YAML files. |
+| `--repository-configuration-file` | | Override the `.ort.yml` embedded in the result. |
+| `--resolutions-file` | | Resolutions file; overrides the one embedded in the result. |
+| `--refresh-resolutions` | | Re-read resolutions from config instead of using the embedded resolved configuration. |
+| `--how-to-fix-text-provider-script` | | Kotlin script that injects "how to fix" Markdown text into reports. |
+
+## Real examples
+
+<CodeGroup>
+
+```bash Single format
+ort report \
+  -i /results/evaluator/evaluation-result.yml \
+  -o /results/reports \
+  -f WebApp
+```
+
+```bash Multiple formats
+ort report \
+  -i /results/evaluator/evaluation-result.yml \
+  -o /results/reports \
+  -f CycloneDX,SpdxDocument,StaticHTML,WebApp
+```
+
+```bash NOTICE file with options
+ort report \
+  -i /results/evaluator/evaluation-result.yml \
+  -o /results/reports \
+  -f PlainTextTemplate \
+  -O PlainTextTemplate=template.id=NOTICE_SUMMARY
+```
+
+</CodeGroup>
+
+## Available report formats
+
+<AccordionGroup>
+  <Accordion title="SBOMs and standards-based formats">
+    | Flag | Description |
+    |---|---|
+    | `-f CycloneDX` | [CycloneDX](https://cyclonedx.org/) BOM (XML/JSON). |
+    | `-f SpdxDocument` | [SPDX](https://spdx.dev/specifications/) Document, version 2.2. |
+    | `-f CtrlXAutomation` | [ctrlX AUTOMATION](https://apps.boschrexroth.com/microsites/ctrlx-automation/) FOSS info JSON. |
+    | `-f AOSD2.0` | Audi Open Source Diagnostics version 2.0. |
+    | `-f AOSD2.1` | Audi Open Source Diagnostics version 2.1. |
+    | `-f TrustSource` | [TrustSource](https://www.trustsource.io/) JSON. Supports more build systems than ts-scan. |
+  </Accordion>
+  <Accordion title="Web and HTML reports">
+    | Flag | Description |
+    |---|---|
+    | `-f WebApp` | Interactive single-page application for exploring scan results, violations, and vulnerabilities. |
+    | `-f StaticHTML` | Self-contained static HTML report. |
+    | `-f HtmlTemplate` | HTML report generated from an AsciiDoc template. |
+  </Accordion>
+  <Accordion title="NOTICE and plain text">
+    | Flag | Description |
+    |---|---|
+    | `-f PlainTextTemplate` | NOTICE file listing license texts and copyrights per package. |
+    | `-f PlainTextTemplate -O PlainTextTemplate=template.id=NOTICE_SUMMARY` | NOTICE file summarizing all license texts and copyrights. |
+    | `-f ManPageTemplate` | Man page via AsciiDoc. |
+  </Accordion>
+  <Accordion title="Document formats (PDF, DocBook)">
+    | Flag | Description |
+    |---|---|
+    | `-f PdfTemplate` | PDF report via AsciiDoc + Asciidoctor PDF. Supports custom PDF themes. |
+    | `-f AsciiDocTemplate` | AsciiDoc source generated from a Freemarker template. |
+    | `-f DocBookTemplate` | DocBook XML via AsciiDoc. |
+  </Accordion>
+  <Accordion title="FossID reports">
+    | Flag | Description |
+    |---|---|
+    | `-f FossID` | Downloads HTML, SPDX, and Excel reports from a FossID server. Requires FossID configuration. |
+    | `-f FossIdSnippet` | Downloads snippet reports from FossID. |
+  </Accordion>
+  <Accordion title="Tool integration">
+    | Flag | Description |
+    |---|---|
+    | `-f Opossum` | [OpossumUI](https://github.com/opossum-tool/opossumUI) input file for manual curation. |
+    | `-f EvaluatedModel` | JSON/YAML representation of the evaluated model. Suitable for custom post-processing and used internally by WebApp. |
+  </Accordion>
+</AccordionGroup>
+
+## Using `-O` for reporter options
+
+The `-O` flag lets you pass format-specific key-value options without modifying the config file. The syntax is:
+
+```
+-O <ReporterName>=<option-key>=<option-value>
+```
+
+Common uses:
+
+```bash
+# Use a different NOTICE template
+-O PlainTextTemplate=template.id=NOTICE_SUMMARY
+
+# Set a custom CycloneDX schema version
+-O CycloneDX=schemaVersion=1.5
+```
+
+Multiple `-O` flags can be combined in a single invocation:
+
+```bash
+ort report \
+  -i /results/evaluator/evaluation-result.yml \
+  -o /results/reports \
+  -f PlainTextTemplate,CycloneDX \
+  -O PlainTextTemplate=template.id=NOTICE_SUMMARY \
+  -O CycloneDX=schemaVersion=1.5
+```
+
+## Custom Freemarker templates
+
+The `PlainTextTemplate`, `AsciiDocTemplate`, `HtmlTemplate`, and `PdfTemplate` reporters use [Apache Freemarker](https://freemarker.apache.org/) templates. You can override the built-in templates by passing a custom template path:
+
+```bash
+-O PlainTextTemplate=template.path=/path/to/my-notice.ftl
+```
+
+## Output
+
+Each reporter produces one or more files in the output directory. File names follow the reporter's convention (e.g., `notice.txt` for `PlainTextTemplate`, `bom.xml` for `CycloneDX`).
+
+<Tip>
+Run `ort report -f WebApp` during development to get an interactive view of all scan results, violations, and vulnerability data in a single HTML file.
+</Tip>

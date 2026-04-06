@@ -1,0 +1,244 @@
+---
+title: "CI integrations"
+description: "Ready-to-use ORT integrations for GitHub Actions, GitLab CI, Jenkins, and Tekton."
+---
+
+ORT ships official integrations for the most common CI platforms. Each integration wraps the ORT Docker image and exposes the full pipeline — analyze, scan, advise, evaluate, and report — as parameterized CI jobs.
+
+<CardGroup cols={2}>
+  <Card title="GitHub Actions" icon="github" href="#github-actions">
+    `oss-review-toolkit/ort-ci-github-action`
+  </Card>
+  <Card title="GitLab CI" icon="gitlab" href="#gitlab-ci">
+    `oss-review-toolkit/ort-gitlab-ci`
+  </Card>
+  <Card title="Jenkins" icon="circle" href="#jenkins">
+    `integrations/jenkins/Jenkinsfile`
+  </Card>
+  <Card title="Tekton" icon="circle" href="#tekton">
+    `integrations/tekton/ort-pipeline.yaml`
+  </Card>
+</CardGroup>
+
+## GitHub Actions
+
+The [ORT GitHub Action](https://github.com/oss-review-toolkit/ort-ci-github-action) runs ORT against your repository on every push or pull request.
+
+### Basic usage
+
+```yaml
+name: ORT scan
+
+on: [push, pull_request]
+
+jobs:
+  ort:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run ORT
+        uses: oss-review-toolkit/ort-ci-github-action@v1
+        with:
+          allow-dynamic-versions: "true"
+```
+
+### Passing an ORT config file
+
+Store your ORT configuration in the repository (for example at `.ort/config.yml`) and reference it via the action input:
+
+```yaml
+- name: Run ORT
+  uses: oss-review-toolkit/ort-ci-github-action@v1
+  with:
+    ort-config-path: ".ort"
+```
+
+Alternatively, point to a separate configuration repository:
+
+```yaml
+- name: Run ORT
+  uses: oss-review-toolkit/ort-ci-github-action@v1
+  with:
+    ort-config-repository: "https://github.com/my-org/ort-config.git"
+```
+
+### Selecting report formats
+
+```yaml
+- name: Run ORT
+  uses: oss-review-toolkit/ort-ci-github-action@v1
+  with:
+    report-formats: "CycloneDX,SpdxDocument,StaticHTML,WebApp"
+```
+
+## GitLab CI
+
+The [ORT GitLab Pipeline](https://github.com/oss-review-toolkit/ort-gitlab-ci) provides an equivalent integration for GitLab.
+
+Include it in your `.gitlab-ci.yml`:
+
+```yaml
+include:
+  - remote: "https://raw.githubusercontent.com/oss-review-toolkit/ort-gitlab-ci/main/ort.yml"
+
+variables:
+  ORT_ALLOW_DYNAMIC_VERSIONS: "true"
+  ORT_REPORT_FORMATS: "CycloneDX,SpdxDocument,StaticHTML"
+```
+
+The pipeline exposes the same stages as the GitHub Action and archives all ORT result artifacts.
+
+## Jenkins
+
+The Jenkins integration lives in the ORT repository at `integrations/jenkins/Jenkinsfile`. It defines a parameterized declarative pipeline that builds the ORT Docker image and runs each stage as a separate Jenkins stage.
+
+### Prerequisites
+
+Install the following Jenkins plugins before using the pipeline:
+
+- [Copy Artifact](https://plugins.jenkins.io/copyartifact/)
+- [Docker Pipeline](https://plugins.jenkins.io/docker-workflow)
+- [File Parameter](https://plugins.jenkins.io/file-parameters/)
+- [Pipeline Utility Steps](https://plugins.jenkins.io/pipeline-utility-steps)
+
+Docker must be installed on the Jenkins agent, and the `jenkins` user must be in the `docker` group:
+
+```bash
+usermod -aG docker jenkins
+```
+
+### Setting up the pipeline
+
+<Steps>
+  <Step title="Create a new pipeline job">
+    In the Jenkins dashboard, click **New Item**, name it (for example "ORT"), choose **Pipeline**, and click **OK**.
+  </Step>
+
+  <Step title="Configure the pipeline source">
+    In the **Pipeline** section, choose **Pipeline script from SCM** and set:
+
+    - **SCM**: `Git`
+    - **Repository URL**: `https://github.com/oss-review-toolkit/ort.git`
+    - **Branch Specifier**: `*/main`
+    - **Script Path**: `integrations/jenkins/Jenkinsfile`
+  </Step>
+
+  <Step title="Run an initial build">
+    Click **Build Now** to trigger the first run. This run initializes the pipeline parameters and is expected to fail. After it completes, use **Build with Parameters** for subsequent runs.
+  </Step>
+</Steps>
+
+### Key pipeline parameters
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `PROJECT_VCS_URL` | Git URL of the project to scan | — |
+| `ORT_CONFIG_VCS_URL` | Git URL of your ORT configuration repository | `oss-review-toolkit/ort-config` |
+| `RUN_SCANNER` | Whether to run the scanner stage | `true` |
+| `RUN_ADVISOR` | Whether to run the advisor stage | `true` |
+| `RUN_EVALUATOR` | Whether to run the evaluator stage | `true` |
+| `REPORT_FORMATS` | Comma-separated list of report formats | `CycloneDX,SpdxDocument,PlainTextTemplate,StaticHTML,WebApp` |
+| `ADVISORS` | Comma-separated list of advisors | `OSV,VulnerableCode` |
+
+All ORT result files are archived as build artifacts at the end of each stage.
+
+<Note>
+  The first run will take longer because the ORT Docker image is built from scratch. Subsequent runs reuse the cached image layers.
+</Note>
+
+## Tekton
+
+The Tekton integration is defined in `integrations/tekton/ort-pipeline.yaml`. It runs on Kubernetes and is optimized for Google Kubernetes Engine (GKE) with Google Cloud Storage (GCS) for result upload, but can be adapted to other Kubernetes environments.
+
+### Prerequisites
+
+- A Kubernetes cluster with [Tekton Pipelines](https://tekton.dev/docs/pipelines/install/) installed
+- The [`git-clone`](https://github.com/tektoncd/catalog/tree/main/task/git-clone) and [`gcs-upload`](https://github.com/tektoncd/catalog/tree/main/task/gcs-upload) Tekton catalog tasks
+- A GCS bucket for result storage
+
+### Deploying the pipeline
+
+Replace `ort:latest` in `ort-pipeline.yaml` with the full image reference (for example `gcr.io/<project-id>/ort:latest`), then apply the pipeline:
+
+```bash
+kubectl apply -f integrations/tekton/ort-pipeline.yaml
+```
+
+### Triggering a scan
+
+```bash
+kubectl apply -f integrations/tekton/simple-maven.yaml
+```
+
+Or create a `PipelineRun` directly:
+
+```yaml
+apiVersion: tekton.dev/v1beta1
+kind: PipelineRun
+metadata:
+  name: ort-scan-my-project
+spec:
+  pipelineRef:
+    name: ort-scan
+  params:
+    - name: repo-url
+      value: "https://github.com/my-org/my-project.git"
+    - name: result-bucket-path
+      value: "gs://my-ort-results/my-project"
+  workspaces:
+    - name: shared-data
+      volumeClaimTemplate:
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 10Gi
+    - name: gcs-credentials
+      secret:
+        secretName: gcs-credentials
+    - name: ort-data-dir
+      volumeClaimTemplate:
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 5Gi
+```
+
+The pipeline runs these steps in sequence: clone project → analyze → scan → evaluate → report → upload results to GCS.
+
+### Triggering via EventListeners
+
+For automated triggers on push events, see the [Tekton Triggers documentation](https://tekton.dev/docs/triggers/) to configure `EventListener` and `TriggerTemplate` resources.
+
+## Passing ORT config in CI
+
+All integrations support pointing ORT to an external configuration repository. This is the recommended approach for organizations running ORT across multiple projects, as it centralizes curations, evaluator rules, and license classifications in one place.
+
+<Tabs>
+  <Tab title="GitHub Actions">
+    ```yaml
+    - uses: oss-review-toolkit/ort-ci-github-action@v1
+      with:
+        ort-config-repository: "https://github.com/my-org/ort-config.git"
+        ort-config-revision: "main"
+    ```
+  </Tab>
+  <Tab title="GitLab CI">
+    ```yaml
+    variables:
+      ORT_CONFIG_VCS_URL: "https://gitlab.com/my-org/ort-config.git"
+      ORT_CONFIG_VCS_REVISION: "main"
+    ```
+  </Tab>
+  <Tab title="Jenkins">
+    Set the `ORT_CONFIG_VCS_URL` and `ORT_CONFIG_VCS_REVISION` parameters when triggering a build.
+  </Tab>
+  <Tab title="Tekton">
+    Add a second `git-clone` task to fetch your config repository into the shared workspace, then set `ORT_DATA_DIR` to point ORT at the config directory.
+  </Tab>
+</Tabs>
+
+The [ORT Config repository](https://github.com/oss-review-toolkit/ort-config) provides a public example of well-structured ORT configuration files.

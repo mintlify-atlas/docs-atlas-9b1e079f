@@ -1,0 +1,292 @@
+---
+title: "Quickstart"
+description: "Run a full ORT compliance pipeline — analyze, scan, evaluate, and report — on a real project in minutes."
+---
+
+This guide walks you through a complete ORT pipeline using the [mime-types](https://www.npmjs.com/package/mime-types) npm package as an example. By the end you will have:
+
+- A full dependency graph from the **Analyzer**
+- License findings from the **Scanner**
+- Policy violation checks from the **Evaluator**
+- Human-readable reports from the **Reporter**
+
+<Note>
+  This guide assumes ORT is installed and available on your `PATH` as `ort`. If you have not installed ORT yet, see the [Installation](/getting-started/installation) page first.
+</Note>
+
+---
+
+## Prerequisites
+
+The following tools must be installed on your system for this tutorial:
+
+- **Java 21+** (required by ORT)
+- **Git** (any recent version)
+- **Node.js** 10 or higher
+- **npm** 6.4 or higher
+- **Yarn** 1.9 or higher
+- **ScanCode** — install following the [ScanCode installation instructions](https://github.com/aboutcode-org/scancode-toolkit/#installation)
+
+Run the following to confirm ORT can find the required tools:
+
+```bash
+ort requirements
+```
+
+---
+
+## Running with Docker
+
+If you prefer not to install these dependencies locally, use the ORT Docker image, which bundles all supported package managers:
+
+```bash
+docker run --rm \
+  -v /path/to/mime-types:/project \
+  -v /path/to/output:/output \
+  ghcr.io/oss-review-toolkit/ort \
+  -P ort.analyzer.allowDynamicVersions=true \
+  analyze -i /project -o /output
+```
+
+Replace the volume paths and ORT subcommand as you follow each step below.
+
+---
+
+## Step-by-step walkthrough
+
+<Steps>
+  <Step title="Clone the example project">
+
+Clone version 2.1.18 of `mime-types` to a local directory. Using a pinned version ensures reproducible results.
+
+```bash
+git clone https://github.com/jshttp/mime-types.git mime-types
+cd mime-types
+git checkout 2.1.18
+```
+
+  </Step>
+
+  <Step title="Run the Analyzer">
+
+The Analyzer detects the project's package manager, resolves all dependencies, and writes a full dependency graph to `analyzer-result.yml`.
+
+```bash
+ort -P ort.analyzer.allowDynamicVersions=true \
+  analyze -i /path/to/mime-types -o /path/to/analyzer-output
+```
+
+**Why `allowDynamicVersions`?** The `mime-types` package has no `package-lock.json`. Without a lockfile, dependency versions are resolved at runtime from version ranges and could differ between runs. ORT refuses to proceed by default to prevent non-reproducible results. The `-P` flag overrides this check for this tutorial.
+
+Expected output:
+
+```
+The following package managers are activated:
+        Bundler, Composer, Gradle, Maven, NPM, PIP, SBT, Stack, Yarn
+Analyzing project path:
+        /path/to/mime-types
+Writing analyzer result to '/path/to/analyzer-output/analyzer-result.yml'.
+```
+
+The output file is at `analyzer-output/analyzer-result.yml`.
+
+### Analyzer result structure
+
+The `analyzer-result.yml` captures everything ORT knows about the project at this stage:
+
+```yaml
+# VCS information about the analyzed repository.
+repository:
+  vcs:
+    type: "Git"
+    url: "https://github.com/jshttp/mime-types.git"
+    revision: "7c4ce23d7354fbf64c69d7b7be8413c4ba2add78"
+    path: ""
+  # Scope exclusions from .ort.yml (if provided).
+  config:
+    excludes:
+      scopes:
+      - pattern: "devDependencies"
+        reason: "DEV_DEPENDENCY_OF"
+        comment: "Packages for development only."
+
+# Analyzer metadata and results.
+analyzer:
+  start_time: "2019-02-19T10:03:07.269Z"
+  end_time: "2019-02-19T10:03:19.932Z"
+  config:
+    allow_dynamic_versions: true
+  result:
+    # One entry per detected project (here: the mime-types package.json).
+    projects:
+    - id: "NPM::mime-types:2.1.18"
+      purl: "pkg://NPM//mime-types@2.1.18"
+      definition_file_path: "package.json"
+      declared_licenses:
+      - "MIT"
+      declared_licenses_processed:
+        spdx_expression: "MIT"
+      # Dependency trees, one per scope.
+      scopes:
+      - name: "dependencies"
+        dependencies:
+        - id: "NPM::mime-db:1.33.0"
+      - name: "devDependencies"
+        dependencies:
+        - id: "NPM::eslint-config-standard:10.2.1"
+        # ...
+
+    # Detailed metadata for every package in the dependency trees.
+    packages:
+    - package:
+        id: "NPM::abbrev:1.0.9"
+        purl: "pkg://NPM//abbrev@1.0.9"
+        declared_licenses:
+        - "ISC"
+        source_artifact:
+          url: "https://registry.npmjs.org/abbrev/-/abbrev-1.0.9.tgz"
+          hash:
+            value: "91b4792588a7738c25f35dd6f63752a2f8776135"
+            algorithm: "SHA-1"
+        # ...
+
+    # Any issues encountered during analysis.
+    issues: {}
+    has_issues: false
+```
+
+### Excluding scopes with .ort.yml
+
+The `devDependencies` scope is not distributed with the package and usually does not need to be scanned. Create a `.ort.yml` file in the project directory to exclude it from later steps:
+
+```yaml
+excludes:
+  scopes:
+  - pattern: "devDependencies"
+    reason: "DEV_DEPENDENCY_OF"
+    comment: "Packages for development only."
+```
+
+Re-run the Analyzer to pick up the exclusion. Subsequent Scanner and Reporter steps will respect it.
+
+  </Step>
+
+  <Step title="Run the Scanner">
+
+The Scanner downloads the source code for `mime-types` and all its (non-excluded) dependencies, then runs a license scanner over the source.
+
+```bash
+ort -P ort.scanner.skipExcluded=true \
+  scan \
+  -i /path/to/analyzer-output/analyzer-result.yml \
+  -o /path/to/scanner-output
+```
+
+`-P ort.scanner.skipExcluded=true` skips packages in excluded scopes (such as `devDependencies` configured above), saving significant time and resources.
+
+Expected output:
+
+```
+Using scanner 'ScanCode'.
+Limiting scan to scopes: [dependencies]
+Bootstrapping scanner 'ScanCode' as required version 2.9.2 was not found in PATH.
+Using processed VcsInfo(type=git, url=https://github.com/jshttp/mime-db.git, ...)
+Running ScanCode version 2.9.2 on directory '.../downloads/NPM/unknown/mime-db/1.35.0'.
+Running ScanCode version 2.9.2 on directory '.../downloads/NPM/unknown/mime-types/2.1.18'.
+Writing scan result to '/path/to/scanner-output/scan-result.yml'.
+```
+
+The Scanner writes `scan-result.yml`, which contains the original Analyzer output plus the license and copyright findings for each scanned package. Results from previous runs are replaced in the output file.
+
+<Tip>
+  For large projects, configure a [scan storage backend](/tools/scanner) to cache results and avoid re-scanning unchanged packages.
+</Tip>
+
+  </Step>
+
+  <Step title="Run the Evaluator">
+
+The Evaluator applies your policy rules to the scan results and flags any violations. ORT ships example rules, license classifications, and package curations you can use to get started.
+
+```bash
+ort evaluate \
+  --package-curations-file curations.yml \
+  --rules-file evaluator.rules.kts \
+  --license-classifications-file license-classifications.yml \
+  -i /path/to/scanner-output/scan-result.yml \
+  -o /path/to/evaluator-output
+```
+
+The output file `evaluation-result.yml` contains everything from the scan result plus a list of any policy violations found.
+
+<Note>
+  You can write your own rules as a Kotlin script and pass the file path to `--rules-file`. See the [Evaluator rules](/configuration/evaluator-rules) documentation for details.
+</Note>
+
+  </Step>
+
+  <Step title="Generate reports">
+
+The Reporter takes the evaluation result and produces human-readable output in one or more formats.
+
+```bash
+ort report \
+  -f PlainTextTemplate,StaticHTML,WebApp \
+  -i /path/to/evaluator-output/evaluation-result.yml \
+  -o /path/to/reports
+```
+
+Expected output:
+
+```
+Created 'StaticHTML' report: /path/to/reports/scan-report.html
+Created 'WebApp' report: /path/to/reports/scan-report-web-app.html
+Created 'PlainTextTemplate' report: /path/to/reports/NOTICE_DEFAULT
+```
+
+| Format | Description |
+|--------|-------------|
+| `StaticHTML` | Self-contained HTML report with dependency and license tables |
+| `WebApp` | Interactive single-page app for exploring results |
+| `PlainTextTemplate` | Open source attribution notice (customizable via Freemarker templates) |
+| `CycloneDX` | CycloneDX SBOM (JSON or XML) |
+| `SpdxDocument` | SPDX SBOM |
+
+<Tip>
+  You can skip the Evaluator and pass `scan-result.yml` directly to the Reporter if you only need an SBOM or attribution notice without policy checks.
+</Tip>
+
+  </Step>
+</Steps>
+
+---
+
+## Fixing metadata and license findings
+
+In the example above everything worked because `mime-types` has accurate VCS information and a well-declared license. Real-world projects often require corrections. ORT provides several mechanisms:
+
+| Mechanism | Purpose |
+|-----------|---------|
+| [`.ort.yml`](/configuration/ort-yml) | Project-level license finding curations, scope exclusions, and issue resolutions |
+| [Package configurations](/configuration/package-configurations) | Dependency-level path excludes and license finding curations |
+| [Package curations](/configuration/package-curations) | Fix incorrect or missing package metadata, set concluded licenses |
+| [Resolutions](/configuration/resolutions) | Acknowledge known issues or rule violations with a documented reason |
+
+---
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Analyzer" icon="magnifying-glass" href="/tools/analyzer">
+    Supported package managers and advanced analyzer options
+  </Card>
+  <Card title="Scanner" icon="radar" href="/tools/scanner">
+    Supported scanners, storage backends, and scan configuration
+  </Card>
+  <Card title="Evaluator rules" icon="scale-balanced" href="/configuration/evaluator-rules">
+    Write custom policy rules in Kotlin
+  </Card>
+  <Card title="Reporter templates" icon="file-lines" href="/plugins/reporters">
+    Customize reports and SBOM output formats
+  </Card>
+</CardGroup>

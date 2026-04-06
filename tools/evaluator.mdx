@@ -1,0 +1,163 @@
+---
+title: "Evaluator"
+description: "Enforce custom license and vulnerability policies against ORT results using a Kotlin DSL."
+---
+
+The evaluator runs a set of policy rules — written in Kotlin script (`.kts`) files — against an ORT result. Rules can inspect detected licenses, declared licenses, package metadata, vulnerability data, and scope exclusions. Each rule can emit `ERROR`, `WARNING`, or `HINT` violations.
+
+The evaluator exits with a non-zero status code when violations at or above the configured severity threshold are found, making it suitable for CI/CD gates.
+
+## Prerequisites
+
+- An ORT result file containing at least an analyzer result (`analyzer-result.yml`). Results from the scanner and advisor enrich the data available to rules.
+- One or more `.kts` rules files, or a default `evaluator.rules.kts` placed in `~/.ort/config/`.
+
+## CLI usage
+
+```bash
+ort evaluate -i <ort-result.yml> -o <output-dir> -r <rules.kts> [options]
+```
+
+| Flag | Short | Description |
+|---|---|---|
+| `--ort-file` | `-i` | ORT result file to evaluate (required unless `--check-syntax` is used). |
+| `--output-dir` | `-o` | Directory where `evaluation-result.yml` is written. If omitted, no file is written (exit code only). |
+| `--output-formats` | `-f` | Comma-separated output formats: `YAML` (default) or `JSON`. |
+| `--rules-file` | `-r` | Path to a `.kts` rules script. Can be specified multiple times. |
+| `--rules-resource` | | Name of a classpath resource containing rules. |
+| `--license-classifications-file` | | YAML file with license category assignments. |
+| `--copyright-garbage-file` | | File listing copyright statements to discard. |
+| `--package-configurations-dir` | | Directory of per-package configuration YAML files. |
+| `--package-curations-file` | | File of package curations to override metadata. |
+| `--package-curations-dir` | | Directory of package curation files. |
+| `--repository-configuration-file` | | Override the `.ort.yml` embedded in the result. |
+| `--resolutions-file` | | File containing rule violation resolutions. |
+| `--label` | `-l` | Set a key=value label in the result. Repeatable. |
+| `--check-syntax` | | Validate rule script syntax only; no evaluation is performed. |
+
+## Real example
+
+```bash
+ort evaluate \
+  -i /results/advisor/advisor-result.yml \
+  -o /results/evaluator \
+  -r /ort-config/evaluator.rules.kts \
+  --license-classifications-file /ort-config/license-classifications.yml \
+  -f YAML
+```
+
+## Policy rule DSL
+
+Rules are Kotlin scripts that use a purpose-built DSL. The entry point is a `RuleSet` populated with package-level and project-level rules.
+
+### Structure
+
+```kotlin
+val ruleSet = ruleSet(ortResult, licenseInfoResolver, resolutionProvider) {
+    // Define a rule that runs once per package
+    packageRule("MY_RULE") {
+        // require {} = preconditions; rule only fires when all are met
+        require {
+            -isExcluded()   // "-" = must NOT match
+        }
+
+        // Define a sub-rule for each license of the package
+        licenseRule("MY_LICENSE_RULE", LicenseView.CONCLUDED_OR_DECLARED_AND_DETECTED) {
+            require {
+                -isExcluded()
+                +isCopyleft()  // "+" = MUST match
+            }
+
+            error(
+                "Copyleft license $license found in ${pkg.metadata.id.toCoordinates()}.",
+                "See https://example.com/compliance for guidance."
+            )
+        }
+    }
+}
+```
+
+### Built-in matchers
+
+| Matcher | Description |
+|---|---|
+| `isExcluded()` | True when the package or scope is excluded via `.ort.yml`. |
+| `isCopyleft()` | True when the license is in the `copyleft` license classification category. |
+| `isCopyleftLimited()` | True when the license is in the `copyleft-limited` category. |
+| `isHandled()` | True when the license is covered by any classification category. |
+
+### Violation severity levels
+
+| Method | Severity | Description |
+|---|---|---|
+| `error(message, howToFix)` | ERROR | Blocks the build when the threshold is `ERROR`. |
+| `warning(message, howToFix)` | WARNING | Reported but does not block by default. |
+| `hint(message, howToFix)` | HINT | Informational only. |
+
+## Example rule snippet
+
+The following rule raises an error for any copyleft-licensed package that is not excluded:
+
+```kotlin
+fun RuleSet.copyleftInSourceRule() = packageRule("COPYLEFT_IN_SOURCE") {
+    require {
+        -isExcluded()
+    }
+
+    licenseRule("COPYLEFT_IN_SOURCE", LicenseView.CONCLUDED_OR_DECLARED_AND_DETECTED) {
+        require {
+            -isExcluded()
+            +isCopyleft()
+        }
+
+        error(
+            "The copyleft license $license was ${licenseSource.name.lowercase()} " +
+                "in package ${pkg.metadata.id.toCoordinates()}.",
+            "Either use a permissively licensed alternative or obtain a commercial license."
+        )
+    }
+}
+```
+
+This pattern is based on the [`example.rules.kts`](https://github.com/oss-review-toolkit/ort/blob/main/examples/example.rules.kts) in the ORT repository.
+
+<Tip>
+License categories like `copyleft` and `permissive` are defined in a `license-classifications.yml` file. Pass it to the evaluator via `--license-classifications-file` so rules can reference `licenseClassifications.licensesByCategory["copyleft"]`.
+</Tip>
+
+## Output format
+
+The evaluator writes an `evaluation-result.yml` that includes a `violations` list alongside the full ORT result:
+
+```yaml
+evaluator:
+  startTime: "2024-01-15T12:00:00Z"
+  endTime: "2024-01-15T12:00:08Z"
+  violations:
+    - rule: "COPYLEFT_IN_SOURCE"
+      pkg: "NPM::left-pad:1.3.0"
+      license: "GPL-3.0-only"
+      licenseSource: "DETECTED"
+      severity: "ERROR"
+      message: "The copyleft license GPL-3.0-only was detected in package NPM::left-pad:1.3.0."
+      howToFix: "Either use a permissively licensed alternative or obtain a commercial license."
+```
+
+## Configuration
+
+The severity threshold that causes the evaluator to return a non-zero exit code is controlled globally:
+
+```yaml
+ort:
+  severeRuleViolationThreshold: ERROR
+```
+
+Violations can also be individually resolved (suppressed) in a `resolutions.yml` file:
+
+```yaml
+resolutions:
+  ruleViolations:
+    - message: "The copyleft license GPL-3.0-only was detected in package NPM::left-pad:1.3.0."
+      reason: "CANT_FIX_ISSUE"
+      comment: "left-pad is only used in build tooling, not distributed."
+```

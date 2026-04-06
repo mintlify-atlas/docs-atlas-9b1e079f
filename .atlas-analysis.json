@@ -1,0 +1,92 @@
+{
+  "projectType": "cli-tool",
+  "projectName": "OSS Review Toolkit (ORT)",
+  "projectDescription": "A FOSS policy automation and orchestration toolkit for managing open source software dependencies, generating SBOMs, and automating compliance checks.",
+  "theme": "aspen",
+  "primaryColor": "#31beba",
+  "lightColor": "#e99a7c",
+  "darkColor": null,
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "getting-started/installation",
+              "getting-started/quickstart"
+            ]
+          },
+          {
+            "group": "Core Tools",
+            "pages": [
+              "tools/analyzer",
+              "tools/scanner",
+              "tools/advisor",
+              "tools/evaluator",
+              "tools/reporter",
+              "tools/downloader"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "configuration/ort-yml",
+              "configuration/package-curations",
+              "configuration/evaluator-rules",
+              "configuration/license-classifications",
+              "configuration/package-configurations",
+              "configuration/resolutions"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/docker",
+              "guides/ci-integrations",
+              "guides/license-handling",
+              "guides/sbom-generation"
+            ]
+          },
+          {
+            "group": "Plugins",
+            "pages": [
+              "plugins/package-managers",
+              "plugins/scanners",
+              "plugins/advisors",
+              "plugins/reporters"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Dependency analysis across 30+ package managers (npm, Maven, Gradle, pip, Cargo, etc.)",
+    "License and copyright scanning using ScanCode, FossID, Licensee and other scanners",
+    "Security vulnerability advisory via OSV, OSS Index, VulnerableCode, and Black Duck",
+    "Policy as Code with customizable Kotlin-script evaluation rules",
+    "SBOM generation in CycloneDX and SPDX formats",
+    "Flexible reporting: HTML, web app, plain text notices, and custom FreeMarker templates",
+    "Docker support with all required tools pre-installed",
+    "CI/CD integrations for GitHub Actions and GitLab Pipelines",
+    "Package metadata curation and license finding corrections",
+    "Configurable compliance pipeline: Analyzer → Downloader → Scanner → Advisor → Evaluator → Reporter"
+  ],
+  "publicApiSurface": [
+    "ort analyze — analyze project dependencies",
+    "ort scan — scan source code for licenses and copyrights",
+    "ort advise — retrieve security advisories for dependencies",
+    "ort evaluate — apply policy rules to scan results",
+    "ort report — generate reports and SBOMs",
+    "ort download — fetch source code of projects and dependencies",
+    "ort notify — send result notifications via email or JIRA",
+    "ort requirements — list required external tools",
+    "ort config — manage ORT configuration",
+    ".ort.yml — per-project configuration for excludes, curations, and resolutions",
+    "OrtResult — core data model (YAML/JSON) output by each tool stage",
+    "evaluator.rules.kts — Kotlin script DSL for custom policy rules"
+  ]
+}

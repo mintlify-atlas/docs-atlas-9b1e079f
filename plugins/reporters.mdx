@@ -1,0 +1,341 @@
+---
+title: "Reporters"
+description: "ORT's reporter generates SBOM documents, legal notices, and third-party integration files from ORT result files in a wide range of formats."
+---
+
+The reporter takes an ORT result file (typically from the evaluator or scanner) and generates one or more output documents. Reporter names are case-insensitive.
+
+Select output formats with the `--report-formats` (or `-f`) flag:
+
+```bash
+ort report \
+  -i evaluation-result.yml \
+  -o reports/ \
+  -f StaticHTML,WebApp,PlainTextTemplate,CycloneDX,SpdxDocument
+```
+
+Pass reporter-specific options with `--report-option` (or `-O`):
+
+```bash
+ort report \
+  -i evaluation-result.yml \
+  -o reports/ \
+  -f PlainTextTemplate \
+  -O PlainTextTemplate=template.id=NOTICE_DEFAULT,NOTICE_SUMMARY
+```
+
+## SBOM formats
+
+<AccordionGroup>
+
+<Accordion title="CycloneDX">
+
+Generates a [CycloneDX](https://cyclonedx.org/) Bill of Materials. CycloneDX is an OWASP standard with broad toolchain support.
+
+| Flag | Output file |
+|---|---|
+| `-f CycloneDX` | `cyclone-dx.xml` or `cyclone-dx.json` depending on schema version |
+
+**Configuration**
+
+```yaml
+ort:
+  reporter:
+    config:
+      CycloneDX:
+        options:
+          schema.version: "1.6"
+```
+
+**ORT-specific properties**
+
+ORT adds the following custom properties to the CycloneDX output following the [CycloneDX property taxonomy](https://cyclonedx.github.io/cyclonedx-property-taxonomy/):
+
+| Property | Parent entity | Description |
+|---|---|---|
+| `ort:dependencyType` | `component` | Dependency relationship: `"direct"` or `"transitive"`. |
+| `ort:origin` | `license` | License source: `"declared license"`, `"detected license"`, or `"concluded license"`. |
+
+</Accordion>
+
+<Accordion title="SPDX Document">
+
+Generates an [SPDX 2.2](https://spdx.dev/specifications/) document. SPDX is an ISO standard for communicating software bill of materials information.
+
+| Flag | Description |
+|---|---|
+| `-f SpdxDocument` | SPDX document (format auto-selected based on extension; supports JSON, YAML, RDF, tag-value, and XLSX) |
+
+</Accordion>
+
+</AccordionGroup>
+
+## Human-readable reports
+
+<AccordionGroup>
+
+<Accordion title="Static HTML">
+
+Generates a self-contained single HTML file with a full summary of all scan findings, policy violations, and vulnerability information. Suitable for sharing with legal or compliance teams.
+
+| Flag | Output file |
+|---|---|
+| `-f StaticHTML` | `static-html-ort-report.html` |
+
+</Accordion>
+
+<Accordion title="Web App">
+
+Generates an interactive single-page web application. The Web App report provides filtering, searching, and drill-down navigation across all packages, licenses, and violations.
+
+| Flag | Output file |
+|---|---|
+| `-f WebApp` | `ort-results.html` |
+
+The underlying data model is also available as a standalone JSON/YAML file via the `EvaluatedModel` reporter, which is suitable for custom post-processing.
+
+| Flag | Output file |
+|---|---|
+| `-f EvaluatedModel` | `evaluated-model.json` |
+
+</Accordion>
+
+<Accordion title="Plain text NOTICE files">
+
+Generates plain text NOTICE files listing license texts and copyright statements. Uses [Apache Freemarker](https://freemarker.apache.org/) templates internally.
+
+ORT ships two built-in templates:
+
+| Template ID | Description |
+|---|---|
+| `NOTICE_DEFAULT` | Lists license texts and copyrights per package. |
+| `NOTICE_SUMMARY` | Summarizes all license texts and copyrights across all packages. |
+
+**Usage**
+
+```bash
+ort report \
+  -i evaluation-result.yml \
+  -o reports/ \
+  -f PlainTextTemplate \
+  -O PlainTextTemplate=template.id=NOTICE_DEFAULT,NOTICE_SUMMARY
+```
+
+Both template IDs can be specified together; ORT generates a separate output file for each.
+
+**Custom templates**
+
+Point to your own `.ftl` files with `template.path`. The output filename is derived from the template filename (`.ftl` suffix removed):
+
+```bash
+ort report \
+  -i evaluation-result.yml \
+  -o reports/ \
+  -f PlainTextTemplate \
+  -O PlainTextTemplate=template.path=/path/to/custom-notice.md.ftl,/path/to/another.adoc.ftl
+```
+
+</Accordion>
+
+<Accordion title="AsciiDoc templates">
+
+Generates structured documents using [Apache Freemarker](https://freemarker.apache.org/) templates rendered through [AsciidoctorJ](https://github.com/asciidoctor/asciidoctorj). The output format depends on the `-f` flag used.
+
+| Flag | Output format |
+|---|---|
+| `-f PdfTemplate` | PDF (via AsciidoctorJ PDF) |
+| `-f HtmlTemplate` | HTML (via Asciidoctor HTML converter) |
+| `-f DocBookTemplate` | DocBook XML |
+| `-f ManPageTemplate` | Unix man page |
+| `-f AsciiDocTemplate` | Raw AsciiDoc intermediate file |
+
+**Built-in template IDs**
+
+| Template ID | Description |
+|---|---|
+| `disclosure_document` | Full disclosure document listing all licenses and copyrights. |
+| `vulnerability_report` | Security vulnerability summary. |
+| `defect_report` | Defect and issue report. |
+
+**Usage**
+
+```bash
+ort report \
+  -i scanner-result.yml \
+  -o reports/ \
+  -f PdfTemplate \
+  --report-option PdfTemplate=template.id=disclosure_document \
+  --report-option PdfTemplate=pdf.theme.file=/path/to/theme.yml
+```
+
+**PDF options**
+
+| Option | Description |
+|---|---|
+| `pdf.theme.file` | Path to an AsciiDoc PDF theme YAML file. |
+| `pdf.fonts.dir` | Path to a directory containing custom fonts referenced in the theme. |
+
+</Accordion>
+
+</AccordionGroup>
+
+## Third-party integration formats
+
+<AccordionGroup>
+
+<Accordion title="FossID report download">
+
+Downloads reports directly from a FossID server instance. Requires a FossID configuration in your ORT config file.
+
+| Flag | Description |
+|---|---|
+| `-f FossID` | Downloads HTML, SPDX, and Excel reports from FossID. |
+| `-f FossIdSnippet` | Downloads the FossID snippet report. |
+
+**Configuration**
+
+```yaml
+ort:
+  reporter:
+    config:
+      FossId:
+        options:
+          serverUrl: "https://fossid.example.com/instance/"
+        secrets:
+          user: user
+          apiKey: XYZ
+```
+
+</Accordion>
+
+<Accordion title="TrustSource">
+
+Generates a [TrustSource](https://www.trustsource.io/) JSON file. Use this as an alternative to [ts-scan](https://github.com/TrustSource/ts-scan) when you need support for more build systems.
+
+| Flag | Output file |
+|---|---|
+| `-f TrustSource` | `TrustSource.json` |
+
+</Accordion>
+
+<Accordion title="OpossumUI input">
+
+Generates an input file for [OpossumUI](https://github.com/opossum-tool/opossumUI), an open source tool for manual license review and curation.
+
+| Flag | Output file |
+|---|---|
+| `-f Opossum` | `opossum_input.json` |
+
+</Accordion>
+
+<Accordion title="AOSD (Audi Open Source Diagnostics)">
+
+Generates an [AOSD](https://www.aosd.cloud.audi/help) compliance report for Audi's open source management process.
+
+| Flag | Description |
+|---|---|
+| `-f AOSD2.0` | AOSD format version 2.0 |
+| `-f AOSD2.1` | AOSD format version 2.1 |
+
+</Accordion>
+
+<Accordion title="ctrlX AUTOMATION">
+
+Generates [FOSS information](https://github.com/boschrexroth/json-schema/tree/master/ctrlx-automation/ctrlx-os/apps/fossinfo) for the [ctrlX AUTOMATION](https://apps.boschrexroth.com/microsites/ctrlx-automation/) platform from Bosch Rexroth.
+
+| Flag | Output file |
+|---|---|
+| `-f CtrlXAutomation` | `ctrlx_automation_foss_info.json` |
+
+**Configuration**
+
+```yaml
+ort:
+  reporter:
+    config:
+      CtrlXAutomation:
+        options:
+          licenseCategoriesToInclude: "include-in-disclosure-document"
+```
+
+</Accordion>
+
+</AccordionGroup>
+
+## Custom output with FreemarkerTemplate
+
+The `FreemarkerTemplate` reporter (used internally by `PlainTextTemplate` and `AsciiDocTemplate`) lets you produce any text-based output format from a custom [Apache Freemarker](https://freemarker.apache.org/) template.
+
+Your template has access to the full ORT result model, including all packages, licenses, violations, and vulnerabilities. The output filename is taken from the template filename with the `.ftl` suffix stripped.
+
+<Steps>
+
+<Step title="Create a Freemarker template">
+
+Create a file like `custom-report.md.ftl`:
+
+```
+# License Report
+
+<#list packages as package>
+## ${package.id.toCoordinates()}
+Licenses: ${package.concludedLicense!"(not concluded)"}
+</#list>
+```
+
+</Step>
+
+<Step title="Run the reporter with your template">
+
+```bash
+ort report \
+  -i evaluation-result.yml \
+  -o reports/ \
+  -f PlainTextTemplate \
+  -O PlainTextTemplate=template.path=/path/to/custom-report.md.ftl
+```
+
+</Step>
+
+<Step title="Find your output file">
+
+ORT writes `custom-report.md` to the output directory.
+
+</Step>
+
+</Steps>
+
+## Generating multiple reports at once
+
+Pass a comma-separated list of format names to `-f` (or use multiple `-f` flags) to generate several reports in a single run:
+
+```bash
+ort report \
+  -i evaluation-result.yml \
+  -o reports/ \
+  -f StaticHTML,WebApp,CycloneDX,SpdxDocument,PlainTextTemplate \
+  -O PlainTextTemplate=template.id=NOTICE_DEFAULT
+```
+
+## All formats at a glance
+
+| Flag | Type | Description |
+|---|---|---|
+| `CycloneDX` | SBOM | CycloneDX BOM (XML/JSON) |
+| `SpdxDocument` | SBOM | SPDX 2.2 document |
+| `StaticHTML` | Human-readable | Self-contained HTML summary |
+| `WebApp` | Human-readable | Interactive single-page report |
+| `EvaluatedModel` | Data | JSON/YAML data model for the Web App |
+| `PlainTextTemplate` | Human-readable | NOTICE files via Freemarker templates |
+| `PdfTemplate` | Human-readable | PDF via AsciiDoc + Freemarker |
+| `HtmlTemplate` | Human-readable | HTML via AsciiDoc + Freemarker |
+| `DocBookTemplate` | Human-readable | DocBook via AsciiDoc + Freemarker |
+| `ManPageTemplate` | Human-readable | Man page via AsciiDoc + Freemarker |
+| `AsciiDocTemplate` | Human-readable | Raw AsciiDoc intermediate |
+| `FossID` | Integration | HTML/SPDX/Excel download from FossID |
+| `FossIdSnippet` | Integration | Snippet report download from FossID |
+| `TrustSource` | Integration | TrustSource JSON |
+| `Opossum` | Integration | OpossumUI input JSON |
+| `AOSD2.0` | Integration | Audi AOSD 2.0 |
+| `AOSD2.1` | Integration | Audi AOSD 2.1 |
+| `CtrlXAutomation` | Integration | Bosch Rexroth ctrlX FOSS info |

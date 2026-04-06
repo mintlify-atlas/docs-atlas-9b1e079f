@@ -1,0 +1,166 @@
+---
+title: "Resolutions"
+description: "Acknowledge and suppress specific ORT issues, policy rule violations, or vulnerabilities by providing a documented reason why they are acceptable."
+---
+
+Resolutions mark specific scan issues, policy rule violations, or vulnerabilities as acceptable. They do not fix the underlying finding — they document why it can be ignored. The reporter applies resolutions when generating output; the analyzer and scanner are not affected.
+
+<Warning>
+Resolutions should not be used to suppress license policy rule violations. A resolution does not change generated open source notices. For license findings that are incorrect, add a [license finding curation](/configuration/ort-yml#curations) (for your own source) or a [package configuration](/configuration/package-configurations) (for dependencies) instead.
+</Warning>
+
+---
+
+## Global vs. project-specific resolutions
+
+| File | Scope | When to use |
+|---|---|---|
+| `resolutions.yml` | All scans | Issues or violations not tied to a specific project |
+| `.ort.yml` `resolutions:` | Current project only | Issues that arise only in this repository |
+
+If a resolution only applies to one project, put it in [`.ort.yml`](/configuration/ort-yml#resolutions). This makes the global `resolutions.yml` easier to review and keeps project-specific exceptions visible in the project repository.
+
+---
+
+## File location
+
+Place `resolutions.yml` at `$ORT_CONFIG_DIR/resolutions.yml`.
+
+---
+
+## Resolution structure
+
+Each resolution matches by regular expression and requires a `reason` and `comment`.
+
+```yaml
+issues:
+- message: "A regular expression matching the error message."
+  reason: "One of IssueResolutionReason"
+  comment: "Explanation of why this is acceptable."
+
+rule_violations:
+- message: "A regular expression matching the violation message."
+  reason: "One of RuleViolationResolutionReason"
+  comment: "Explanation of why this is acceptable."
+
+vulnerabilities:
+- id: "A regular expression matching the vulnerability ID."
+  reason: "One of VulnerabilityResolutionReason"
+  comment: "Explanation of why this is acceptable."
+```
+
+The `message` and `id` fields are matched as Java regular expressions against the full issue message or CVE identifier.
+
+---
+
+## Resolving issues
+
+Issues are errors or warnings produced by the analyzer, scanner, or other ORT tools. Use issue resolutions when a problem cannot be fixed and must be acknowledged.
+
+Available reasons are defined in [`IssueResolutionReason.kt`](https://github.com/oss-review-toolkit/ort/blob/main/model/src/main/kotlin/config/IssueResolutionReason.kt). Common values:
+
+| Reason | Description |
+|---|---|
+| `BUILD_TOOL_ISSUE` | The issue is caused by a bug or limitation of a build tool |
+| `CANT_FIX_ISSUE` | The issue cannot be fixed (e.g., in a third-party dependency) |
+| `SCANNER_ISSUE` | The issue is caused by a known scanner bug or timeout |
+
+```yaml
+issues:
+- message: "ERROR: Timeout after 300 seconds while scanning file 'reporter-web-app/public/index.html'."
+  reason: "SCANNER_ISSUE"
+  comment: >-
+    The error can be ignored because the file does not contain relevant license information.
+
+- message: "Does not have X.*"
+  reason: "BUILD_TOOL_ISSUE"
+  comment: "Error caused by a known issue for which a fix is being implemented, see https://github.com/..."
+```
+
+---
+
+## Resolving policy rule violations
+
+Rule violation resolutions acknowledge exceptions to policy. Available reasons are defined in [`RuleViolationResolutionReason.kt`](https://github.com/oss-review-toolkit/ort/blob/main/model/src/main/kotlin/config/RuleViolationResolutionReason.kt). Common values:
+
+| Reason | Description |
+|---|---|
+| `CANT_FIX_EXCEPTION` | The violation cannot be fixed |
+| `DYNAMIC_LINKAGE_EXCEPTION` | License obligations are satisfied by dynamic linking |
+| `EXAMPLE_OF_EXCEPTION` | Used only as an example, not distributed |
+| `LICENSE_ACQUIRED_EXCEPTION` | A commercial or special license has been acquired |
+| `PATENT_GRANT_EXCEPTION` | Patent grant resolves the concern |
+
+```yaml
+rule_violations:
+- message: ".*LicenseRef-scancode-qt-commercial-1.1 found in 'third-party/qt/LICENSE'.*"
+  reason: "LICENSE_ACQUIRED_EXCEPTION"
+  comment: "Org-wide commercial Qt license was purchased, see https://jira.example.com/issues/SOURCING-1234"
+```
+
+---
+
+## Resolving vulnerabilities
+
+Vulnerability resolutions suppress CVEs that are not exploitable in your project's deployment context. Available reasons are defined in [`VulnerabilityResolutionReason.kt`](https://github.com/oss-review-toolkit/ort/blob/main/model/src/main/kotlin/config/VulnerabilityResolutionReason.kt). Common values:
+
+| Reason | Description |
+|---|---|
+| `CANT_FIX_VULNERABILITY` | Cannot update or replace the affected package |
+| `INEFFECTIVE_VULNERABILITY` | The vulnerable code path is not reachable in this project |
+| `INVALID_MATCH_VULNERABILITY` | The CVE does not apply to the version in use |
+| `MITIGATED_VULNERABILITY` | A mitigation is in place |
+| `WILL_NOT_FIX_VULNERABILITY` | A deliberate decision not to fix |
+| `WORKAROUND_FOR_VULNERABILITY` | A workaround is implemented |
+
+```yaml
+vulnerabilities:
+- id: "CVE-2022-22965"
+  reason: "INEFFECTIVE_VULNERABILITY"
+  comment: >-
+    This vulnerability only applies to Spring MVC or Spring WebFlux applications;
+    it is ineffective for the current usage scenario.
+
+- id: "CVE-2016-7954"
+  reason: "INEFFECTIVE_VULNERABILITY"
+  comment: >-
+    The CVE is assigned to Bundler which is shipped with JRuby. It concerns gem name
+    hijacking on RubyGems.org, which is irrelevant for this project's usage.
+```
+
+---
+
+## Complete example
+
+```yaml
+# Global resolutions — applied to all scans.
+# For project-specific resolutions, use .ort.yml instead.
+
+issues:
+- message: "Could not download 'Maven:com.example:library:.*"
+  reason: "CANT_FIX_ISSUE"
+  comment: "The artifact is no longer available from the upstream repository."
+
+rule_violations:
+- message: ".*LicenseRef-scancode-qt-commercial-1.1 found in 'third-party/qt/LICENSE'.*"
+  reason: "LICENSE_ACQUIRED_EXCEPTION"
+  comment: "Org-wide commercial Qt license was purchased, see https://jira.example.com/issues/SOURCING-1234"
+
+vulnerabilities:
+- id: "CVE-9999-9999"
+  reason: "INVALID_MATCH_VULNERABILITY"
+  comment: "CVE-9999-9999 is a false positive — the vulnerable version range does not include the version in use."
+```
+
+---
+
+## Command line usage
+
+```bash
+cli/build/install/ort/bin/ort report \
+  -i [evaluator-output-dir]/evaluation-result.yml \
+  -o [reporter-output-dir] \
+  --report-formats PlainTextTemplate,StaticHTML,WebApp \
+  --license-classifications-file $ORT_CONFIG_DIR/license-classifications.yml \
+  --resolutions-file $ORT_CONFIG_DIR/resolutions.yml
+```
